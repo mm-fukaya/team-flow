@@ -475,27 +475,35 @@ export class GitHubService {
     return commits;
   }
 
-  async getReviews(orgName: string, dateRange: DateRange): Promise<GitHubReview[]> {
+  async getReviews(orgName: string, pullRequests: any[], dateRange: DateRange): Promise<GitHubReview[]> {
     const reviews: GitHubReview[] = [];
-    const repos = await this.getRepositories(orgName);
 
-    // 並列処理でリクエスト数を削減（最大10つずつ）
     const batchSize = 10;
-    for (let i = 0; i < repos.length; i += batchSize) {
-      const batch = repos.slice(i, i + batchSize);
-      const promises = batch.map(async (repo) => {
+    for (let i = 0; i < pullRequests.length; i += batchSize) {
+      const batch = pullRequests.slice(i, i + batchSize);
+      const promises = batch.map(async (pr) => {
+        const repoName = pr.base?.repo?.name;
+        if (!repoName) return [] as GitHubReview[];
         try {
-          const data = await this.makeRequest<GitHubReview[]>(`${this.baseURL}/repos/${orgName}/${repo.name}/pulls/reviews`, {
-            per_page: 100
-          });
-          
-          // 日付範囲でフィルタリング
-          return data.filter((review: GitHubReview) => {
+          let page = 1;
+          let hasMore = true;
+          const prReviews: GitHubReview[] = [];
+          while (hasMore) {
+            const data = await this.makeRequest<GitHubReview[]>(`${this.baseURL}/repos/${orgName}/${repoName}/pulls/${pr.number}/reviews`, {
+              per_page: 100,
+              page
+            });
+            prReviews.push(...data);
+            hasMore = data.length === 100;
+            page++;
+          }
+
+          return prReviews.filter((review: GitHubReview) => {
             const submittedAt = moment(review.submitted_at);
             return submittedAt.isBetween(dateRange.startDate, dateRange.endDate, 'day', '[]');
           });
         } catch (error) {
-          console.error(`Error fetching reviews for ${repo.name}:`, error);
+          console.error(`Error fetching reviews for ${repoName} PR #${pr.number}:`, error);
           return [];
         }
       });
@@ -525,7 +533,7 @@ export class GitHubService {
       console.log('GraphQL取得失敗、REST APIにフォールバック:', error.message);
       // GraphQLが失敗した場合、REST APIでPRを取得
       const prs = await this.getPullRequestsREST(orgName, dateRange, testMode);
-      const reviews = await this.getReviews(orgName, dateRange);
+      const reviews = await this.getReviews(orgName, prs, dateRange);
       
       // REST APIの結果をGraphQLと同じ形式に変換
       pullRequests = members.map(member => ({
