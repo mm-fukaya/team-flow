@@ -56,7 +56,7 @@ app.get('/api/activities', (req, res) => {
 // データを取得して保存
 app.post('/api/fetch-data', async (req, res) => {
   try {
-    const { orgName, startDate, endDate } = req.body;
+    const { orgName, startDate, endDate, testMode = false } = req.body;
 
     if (!orgName || !startDate || !endDate) {
       return res.status(400).json({ 
@@ -66,15 +66,16 @@ app.post('/api/fetch-data', async (req, res) => {
 
     const dateRange: DateRange = { startDate, endDate };
     
-    console.log(`Fetching data for ${orgName} from ${startDate} to ${endDate}`);
+    console.log(`Fetching data for ${orgName} from ${startDate} to ${endDate} (testMode: ${testMode})`);
     
-    const activities = await githubService.getAllMemberActivities(orgName, dateRange);
+    const activities = await githubService.getAllMemberActivities(orgName, dateRange, testMode);
     dataService.saveMemberActivities(activities);
 
     res.json({ 
-      message: 'Data fetched and saved successfully',
+      message: `Data fetched and saved successfully (${testMode ? 'TEST MODE' : 'PRODUCTION MODE'})`,
       count: activities.length,
-      lastUpdated: new Date().toISOString()
+      lastUpdated: new Date().toISOString(),
+      testMode
     });
   } catch (error) {
     console.error('Error fetching data:', error);
