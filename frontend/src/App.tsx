@@ -3,6 +3,7 @@ import { Organization, MemberActivity } from './types';
 import { api } from './services/api';
 import { MemberSelector } from './components/MemberSelector';
 import { ActivityChart } from './components/ActivityChart';
+import { RateLimitDisplay } from './components/RateLimitDisplay';
 import moment from 'moment';
 
 function App() {
@@ -81,6 +82,8 @@ function App() {
         <h1 className="text-3xl font-bold text-gray-900 mb-8 text-center">
           Git Status - GitHub活動データ
         </h1>
+
+        <RateLimitDisplay />
 
         <div className="bg-white rounded-lg shadow-md p-6 mb-8">
           <h2 className="text-xl font-semibold text-gray-900 mb-4">設定</h2>

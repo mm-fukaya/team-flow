@@ -87,6 +87,17 @@ app.get('/api/organizations', (req, res) => {
   res.json(organizations);
 });
 
+// レートリミット情報を取得
+app.get('/api/rate-limit', async (req, res) => {
+  try {
+    const rateLimitInfo = githubService.getRateLimitInfo();
+    res.json({ rateLimitInfo });
+  } catch (error) {
+    console.error('Error fetching rate limit info:', error);
+    res.status(500).json({ error: 'Failed to fetch rate limit info' });
+  }
+});
+
 app.listen(port, () => {
   console.log(`Server running on port ${port}`);
 }); 

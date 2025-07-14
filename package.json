@@ -11,5 +11,8 @@
   },
   "devDependencies": {
     "concurrently": "^8.2.2"
+  },
+  "dependencies": {
+    "@octokit/graphql": "^9.0.1"
   }
-} 
+}
