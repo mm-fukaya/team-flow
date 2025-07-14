@@ -30,5 +30,11 @@ export const api = {
       endDate
     });
     return response.data;
+  },
+
+  // レートリミット情報を取得
+  getRateLimit: async (): Promise<{ rateLimitInfo: any }> => {
+    const response = await axios.get(`${API_BASE_URL}/rate-limit`);
+    return response.data;
   }
 }; 
