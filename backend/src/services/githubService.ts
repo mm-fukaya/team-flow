@@ -9,6 +9,7 @@ import {
   MemberActivity,
   DateRange 
 } from '../types';
+import { graphql } from '@octokit/graphql';
 
 interface RateLimitInfo {
   limit: number;
@@ -21,9 +22,15 @@ export class GitHubService {
   private baseURL = 'https://api.github.com';
   private rateLimitInfo: RateLimitInfo | null = null;
   private requestDelay = 1000; // 1秒間隔
+  private graphqlClient: any;
 
   constructor(token: string) {
     this.token = token;
+    this.graphqlClient = graphql.defaults({
+      headers: {
+        authorization: `token ${this.token}`,
+      },
+    });
   }
 
   private getHeaders() {
@@ -148,37 +155,90 @@ export class GitHubService {
     return issues;
   }
 
-  async getPullRequests(orgName: string, dateRange: DateRange): Promise<GitHubPullRequest[]> {
-    const pullRequests: GitHubPullRequest[] = [];
-    const repos = await this.getRepositories(orgName);
-
-    // 並列処理でリクエスト数を削減（最大5つずつ）
-    const batchSize = 5;
-    for (let i = 0; i < repos.length; i += batchSize) {
-      const batch = repos.slice(i, i + batchSize);
-      const promises = batch.map(async (repo) => {
-        try {
-          const data = await this.makeRequest<GitHubPullRequest[]>(`${this.baseURL}/repos/${orgName}/${repo.name}/pulls`, {
-            state: 'all',
-            per_page: 100
-          });
-          
-          // 日付範囲でフィルタリング
-          return data.filter((pr: GitHubPullRequest) => {
-            const createdAt = moment(pr.created_at);
-            return createdAt.isBetween(dateRange.startDate, dateRange.endDate, 'day', '[]');
-          });
-        } catch (error) {
-          console.error(`Error fetching pull requests for ${repo.name}:`, error);
-          return [];
-        }
-      });
-
-      const results = await Promise.all(promises);
-      results.forEach(result => pullRequests.push(...result));
+  /**
+   * GraphQLでPR数・レビュー数を一括取得
+   */
+  async getPullRequestsAndReviewsGraphQL(orgName: string, dateRange: DateRange) {
+    // 1年分の月リストを作成
+    const months: string[] = [];
+    let current = moment(dateRange.startDate).startOf('month');
+    const end = moment(dateRange.endDate).endOf('month');
+    while (current.isSameOrBefore(end)) {
+      months.push(current.format('YYYY-MM'));
+      current.add(1, 'month');
     }
 
-    return pullRequests;
+    // 組織のリポジトリとメンバーをGraphQLで取得
+    const query = `
+      query($org: String!, $repoFirst: Int!, $prFirst: Int!, $reviewFirst: Int!) {
+        organization(login: $org) {
+          repositories(first: $repoFirst, orderBy: {field: UPDATED_AT, direction: DESC}) {
+            nodes {
+              name
+              pullRequests(first: $prFirst, orderBy: {field: CREATED_AT, direction: DESC}) {
+                nodes {
+                  number
+                  createdAt
+                  author { login }
+                  reviews(first: $reviewFirst) {
+                    nodes {
+                      author { login }
+                      submittedAt
+                    }
+                  }
+                }
+              }
+            }
+          }
+          membersWithRole(first: 100) {
+            nodes {
+              login
+              name
+              avatarUrl
+            }
+          }
+        }
+      }
+    `;
+    const variables = {
+      org: orgName,
+      repoFirst: 50, // 取得するリポジトリ数
+      prFirst: 100,  // 各リポジトリのPR数
+      reviewFirst: 50 // 各PRのレビュー数
+    };
+    const res = await this.graphqlClient(query, variables);
+
+    // 月ごと・メンバーごとに集計
+    const memberMap: {[login: string]: {name?: string, avatar_url: string, activities: any}} = {};
+    for (const member of res.organization.membersWithRole.nodes) {
+      memberMap[member.login] = {
+        name: member.name,
+        avatar_url: member.avatarUrl,
+        activities: {}
+      };
+    }
+    for (const repo of res.organization.repositories.nodes) {
+      for (const pr of repo.pullRequests.nodes) {
+        const prMonth = moment(pr.createdAt).format('YYYY-MM');
+        if (memberMap[pr.author?.login]) {
+          if (!memberMap[pr.author.login].activities[prMonth]) {
+            memberMap[pr.author.login].activities[prMonth] = { issues: 0, pullRequests: 0, commits: 0, reviews: 0 };
+          }
+          memberMap[pr.author.login].activities[prMonth].pullRequests++;
+        }
+        for (const review of pr.reviews.nodes) {
+          const reviewMonth = moment(review.submittedAt).format('YYYY-MM');
+          if (memberMap[review.author?.login]) {
+            if (!memberMap[review.author.login].activities[reviewMonth]) {
+              memberMap[review.author.login].activities[reviewMonth] = { issues: 0, pullRequests: 0, commits: 0, reviews: 0 };
+            }
+            memberMap[review.author.login].activities[reviewMonth].reviews++;
+          }
+        }
+      }
+    }
+    // MemberActivity[]形式に変換
+    return Object.entries(memberMap).map(([login, v]) => ({ login, ...v }));
   }
 
   async getCommits(orgName: string, dateRange: DateRange): Promise<GitHubCommit[]> {
@@ -249,7 +309,7 @@ export class GitHubService {
     const issues = await this.getIssues(orgName, dateRange);
     
     console.log('Fetching pull requests...');
-    const pullRequests = await this.getPullRequests(orgName, dateRange);
+    const pullRequests = await this.getPullRequestsAndReviewsGraphQL(orgName, dateRange);
     
     console.log('Fetching commits...');
     const commits = await this.getCommits(orgName, dateRange);
@@ -274,9 +334,9 @@ export class GitHubService {
       });
 
       // プルリクエストを月別に集計
-      const memberPRs = pullRequests.filter(pr => pr.user.login === member.login);
+      const memberPRs = pullRequests.filter(pr => pr.login === member.login);
       memberPRs.forEach(pr => {
-        const yearMonth = moment(pr.created_at).format('YYYY-MM');
+        const yearMonth = moment(pr.activities[Object.keys(pr.activities)[0]]).format('YYYY-MM');
         if (!activities[yearMonth]) {
           activities[yearMonth] = { issues: 0, pullRequests: 0, commits: 0, reviews: 0 };
         }
