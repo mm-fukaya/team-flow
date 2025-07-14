@@ -1,8 +1,12 @@
 {
   "organizations": [
     {
-      "name": "example-org",
-      "displayName": "Example Organization"
+      "name": "macromill",
+      "displayName": "macromill"
+    },
+    {
+      "name": "macromill-mint",
+      "displayName": "macromill-mint"
     }
   ]
 } 

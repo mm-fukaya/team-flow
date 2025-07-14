@@ -24,6 +24,7 @@ export const api = {
 
   // データを取得して保存
   fetchData: async (orgName: string, startDate: string, endDate: string, testMode: boolean = false): Promise<any> => {
+    console.log(`APIリクエスト: 組織=${orgName}, 開始日=${startDate}, 終了日=${endDate}, テストモード=${testMode}`);
     const response = await axios.post(`${API_BASE_URL}/fetch-data`, {
       orgName,
       startDate,

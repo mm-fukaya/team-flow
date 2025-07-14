@@ -24,10 +24,10 @@ function App() {
   }, []);
 
   useEffect(() => {
-    // デフォルトで1年前から今日までを設定
+    // デフォルトで3ヶ月前から今日までを設定
     const today = moment();
-    const oneYearAgo = moment().subtract(1, 'year');
-    setStartDate(oneYearAgo.format('YYYY-MM-DD'));
+    const threeMonthsAgo = moment().subtract(3, 'months');
+    setStartDate(threeMonthsAgo.format('YYYY-MM-DD'));
     setEndDate(today.format('YYYY-MM-DD'));
   }, []);
 
