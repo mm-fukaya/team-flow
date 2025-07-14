@@ -1,4 +1,4 @@
-import axios from 'axios';
+import axios, { AxiosResponse } from 'axios';
 import moment from 'moment';
 import { 
   GitHubUser, 
@@ -10,9 +10,17 @@ import {
   DateRange 
 } from '../types';
 
+interface RateLimitInfo {
+  limit: number;
+  remaining: number;
+  reset: number;
+}
+
 export class GitHubService {
   private token: string;
   private baseURL = 'https://api.github.com';
+  private rateLimitInfo: RateLimitInfo | null = null;
+  private requestDelay = 1000; // 1秒間隔
 
   constructor(token: string) {
     this.token = token;
@@ -26,13 +34,75 @@ export class GitHubService {
     };
   }
 
+  private updateRateLimitInfo(response: AxiosResponse) {
+    const limit = response.headers['x-ratelimit-limit'];
+    const remaining = response.headers['x-ratelimit-remaining'];
+    const reset = response.headers['x-ratelimit-reset'];
+
+    if (limit && remaining && reset) {
+      this.rateLimitInfo = {
+        limit: parseInt(limit),
+        remaining: parseInt(remaining),
+        reset: parseInt(reset)
+      };
+    }
+  }
+
+  private async checkRateLimit(): Promise<void> {
+    if (!this.rateLimitInfo) return;
+
+    if (this.rateLimitInfo.remaining <= 10) {
+      const now = Math.floor(Date.now() / 1000);
+      const waitTime = this.rateLimitInfo.reset - now;
+      
+      if (waitTime > 0) {
+        console.log(`Rate limit approaching. Waiting ${waitTime} seconds...`);
+        await new Promise(resolve => setTimeout(resolve, (waitTime + 1) * 1000));
+      }
+    }
+  }
+
+  private async makeRequest<T>(url: string, params?: any): Promise<T> {
+    await this.checkRateLimit();
+
+    try {
+      const response = await axios.get(url, {
+        headers: this.getHeaders(),
+        params
+      });
+
+      this.updateRateLimitInfo(response);
+
+      // レート制限情報をログ出力
+      if (this.rateLimitInfo) {
+        console.log(`Rate limit: ${this.rateLimitInfo.remaining}/${this.rateLimitInfo.limit} remaining`);
+      }
+
+      // リクエスト間隔を設ける
+      await new Promise(resolve => setTimeout(resolve, this.requestDelay));
+
+      return response.data;
+    } catch (error: any) {
+      if (error.response?.status === 403 && error.response?.headers['x-ratelimit-remaining'] === '0') {
+        const resetTime = error.response.headers['x-ratelimit-reset'];
+        const waitTime = parseInt(resetTime) - Math.floor(Date.now() / 1000);
+        
+        console.log(`Rate limit exceeded. Waiting ${waitTime} seconds...`);
+        await new Promise(resolve => setTimeout(resolve, (waitTime + 1) * 1000));
+        
+        // リトライ
+        return this.makeRequest<T>(url, params);
+      }
+      
+      throw error;
+    }
+  }
+
   async getOrganizationMembers(orgName: string): Promise<GitHubUser[]> {
     try {
-      const response = await axios.get(`${this.baseURL}/orgs/${orgName}/members`, {
-        headers: this.getHeaders(),
-        params: { per_page: 100 }
+      return await this.makeRequest<GitHubUser[]>(`${this.baseURL}/orgs/${orgName}/members`, {
+        per_page: 100
       });
-      return response.data;
     } catch (error) {
       console.error(`Error fetching members for ${orgName}:`, error);
       throw error;
@@ -41,11 +111,9 @@ export class GitHubService {
 
   async getRepositories(orgName: string): Promise<any[]> {
     try {
-      const response = await axios.get(`${this.baseURL}/orgs/${orgName}/repos`, {
-        headers: this.getHeaders(),
-        params: { per_page: 100 }
+      return await this.makeRequest<any[]>(`${this.baseURL}/orgs/${orgName}/repos`, {
+        per_page: 100
       });
-      return response.data;
     } catch (error) {
       console.error(`Error fetching repositories for ${orgName}:`, error);
       throw error;
@@ -56,20 +124,25 @@ export class GitHubService {
     const issues: GitHubIssue[] = [];
     const repos = await this.getRepositories(orgName);
 
-    for (const repo of repos) {
-      try {
-        const response = await axios.get(`${this.baseURL}/repos/${orgName}/${repo.name}/issues`, {
-          headers: this.getHeaders(),
-          params: {
+    // 並列処理でリクエスト数を削減（最大5つずつ）
+    const batchSize = 5;
+    for (let i = 0; i < repos.length; i += batchSize) {
+      const batch = repos.slice(i, i + batchSize);
+      const promises = batch.map(async (repo) => {
+        try {
+          return await this.makeRequest<GitHubIssue[]>(`${this.baseURL}/repos/${orgName}/${repo.name}/issues`, {
             state: 'all',
             since: dateRange.startDate,
             per_page: 100
-          }
-        });
-        issues.push(...response.data);
-      } catch (error) {
-        console.error(`Error fetching issues for ${repo.name}:`, error);
-      }
+          });
+        } catch (error) {
+          console.error(`Error fetching issues for ${repo.name}:`, error);
+          return [];
+        }
+      });
+
+      const results = await Promise.all(promises);
+      results.forEach(result => issues.push(...result));
     }
 
     return issues;
@@ -79,26 +152,30 @@ export class GitHubService {
     const pullRequests: GitHubPullRequest[] = [];
     const repos = await this.getRepositories(orgName);
 
-    for (const repo of repos) {
-      try {
-        const response = await axios.get(`${this.baseURL}/repos/${orgName}/${repo.name}/pulls`, {
-          headers: this.getHeaders(),
-          params: {
+    // 並列処理でリクエスト数を削減（最大5つずつ）
+    const batchSize = 5;
+    for (let i = 0; i < repos.length; i += batchSize) {
+      const batch = repos.slice(i, i + batchSize);
+      const promises = batch.map(async (repo) => {
+        try {
+          const data = await this.makeRequest<GitHubPullRequest[]>(`${this.baseURL}/repos/${orgName}/${repo.name}/pulls`, {
             state: 'all',
             per_page: 100
-          }
-        });
-        
-        // 日付範囲でフィルタリング
-        const filteredPRs = response.data.filter((pr: GitHubPullRequest) => {
-          const createdAt = moment(pr.created_at);
-          return createdAt.isBetween(dateRange.startDate, dateRange.endDate, 'day', '[]');
-        });
-        
-        pullRequests.push(...filteredPRs);
-      } catch (error) {
-        console.error(`Error fetching pull requests for ${repo.name}:`, error);
-      }
+          });
+          
+          // 日付範囲でフィルタリング
+          return data.filter((pr: GitHubPullRequest) => {
+            const createdAt = moment(pr.created_at);
+            return createdAt.isBetween(dateRange.startDate, dateRange.endDate, 'day', '[]');
+          });
+        } catch (error) {
+          console.error(`Error fetching pull requests for ${repo.name}:`, error);
+          return [];
+        }
+      });
+
+      const results = await Promise.all(promises);
+      results.forEach(result => pullRequests.push(...result));
     }
 
     return pullRequests;
@@ -108,20 +185,25 @@ export class GitHubService {
     const commits: GitHubCommit[] = [];
     const repos = await this.getRepositories(orgName);
 
-    for (const repo of repos) {
-      try {
-        const response = await axios.get(`${this.baseURL}/repos/${orgName}/${repo.name}/commits`, {
-          headers: this.getHeaders(),
-          params: {
+    // 並列処理でリクエスト数を削減（最大5つずつ）
+    const batchSize = 5;
+    for (let i = 0; i < repos.length; i += batchSize) {
+      const batch = repos.slice(i, i + batchSize);
+      const promises = batch.map(async (repo) => {
+        try {
+          return await this.makeRequest<GitHubCommit[]>(`${this.baseURL}/repos/${orgName}/${repo.name}/commits`, {
             since: dateRange.startDate,
             until: dateRange.endDate,
             per_page: 100
-          }
-        });
-        commits.push(...response.data);
-      } catch (error) {
-        console.error(`Error fetching commits for ${repo.name}:`, error);
-      }
+          });
+        } catch (error) {
+          console.error(`Error fetching commits for ${repo.name}:`, error);
+          return [];
+        }
+      });
+
+      const results = await Promise.all(promises);
+      results.forEach(result => commits.push(...result));
     }
 
     return commits;
@@ -131,37 +213,51 @@ export class GitHubService {
     const reviews: GitHubReview[] = [];
     const repos = await this.getRepositories(orgName);
 
-    for (const repo of repos) {
-      try {
-        const response = await axios.get(`${this.baseURL}/repos/${orgName}/${repo.name}/pulls/reviews`, {
-          headers: this.getHeaders(),
-          params: {
+    // 並列処理でリクエスト数を削減（最大5つずつ）
+    const batchSize = 5;
+    for (let i = 0; i < repos.length; i += batchSize) {
+      const batch = repos.slice(i, i + batchSize);
+      const promises = batch.map(async (repo) => {
+        try {
+          const data = await this.makeRequest<GitHubReview[]>(`${this.baseURL}/repos/${orgName}/${repo.name}/pulls/reviews`, {
             per_page: 100
-          }
-        });
-        
-        // 日付範囲でフィルタリング
-        const filteredReviews = response.data.filter((review: GitHubReview) => {
-          const submittedAt = moment(review.submitted_at);
-          return submittedAt.isBetween(dateRange.startDate, dateRange.endDate, 'day', '[]');
-        });
-        
-        reviews.push(...filteredReviews);
-      } catch (error) {
-        console.error(`Error fetching reviews for ${repo.name}:`, error);
-      }
+          });
+          
+          // 日付範囲でフィルタリング
+          return data.filter((review: GitHubReview) => {
+            const submittedAt = moment(review.submitted_at);
+            return submittedAt.isBetween(dateRange.startDate, dateRange.endDate, 'day', '[]');
+          });
+        } catch (error) {
+          console.error(`Error fetching reviews for ${repo.name}:`, error);
+          return [];
+        }
+      });
+
+      const results = await Promise.all(promises);
+      results.forEach(result => reviews.push(...result));
     }
 
     return reviews;
   }
 
   async getAllMemberActivities(orgName: string, dateRange: DateRange): Promise<MemberActivity[]> {
+    console.log('Fetching organization members...');
     const members = await this.getOrganizationMembers(orgName);
+    
+    console.log('Fetching issues...');
     const issues = await this.getIssues(orgName, dateRange);
+    
+    console.log('Fetching pull requests...');
     const pullRequests = await this.getPullRequests(orgName, dateRange);
+    
+    console.log('Fetching commits...');
     const commits = await this.getCommits(orgName, dateRange);
+    
+    console.log('Fetching reviews...');
     const reviews = await this.getReviews(orgName, dateRange);
 
+    console.log('Processing member activities...');
     const memberActivities: MemberActivity[] = [];
 
     for (const member of members) {
@@ -217,6 +313,12 @@ export class GitHubService {
       });
     }
 
+    console.log('Member activities processing completed.');
     return memberActivities;
+  }
+
+  // レート制限情報を取得
+  getRateLimitInfo(): RateLimitInfo | null {
+    return this.rateLimitInfo;
   }
 } 
