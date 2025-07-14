@@ -23,11 +23,12 @@ export const api = {
   },
 
   // データを取得して保存
-  fetchData: async (orgName: string, startDate: string, endDate: string): Promise<any> => {
+  fetchData: async (orgName: string, startDate: string, endDate: string, testMode: boolean = false): Promise<any> => {
     const response = await axios.post(`${API_BASE_URL}/fetch-data`, {
       orgName,
       startDate,
-      endDate
+      endDate,
+      testMode
     });
     return response.data;
   },

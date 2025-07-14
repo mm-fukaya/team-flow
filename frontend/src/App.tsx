@@ -16,6 +16,7 @@ function App() {
   const [lastUpdated, setLastUpdated] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [isFetching, setIsFetching] = useState(false);
+  const [testMode, setTestMode] = useState(false);
 
   useEffect(() => {
     loadOrganizations();
@@ -63,9 +64,9 @@ function App() {
 
     setIsFetching(true);
     try {
-      await api.fetchData(selectedOrg, startDate, endDate);
+      await api.fetchData(selectedOrg, startDate, endDate, testMode);
       await loadActivities();
-      alert('データの取得が完了しました');
+      alert(`データの取得が完了しました (${testMode ? 'テストモード' : '本番モード'})`);
     } catch (error) {
       console.error('Error fetching data:', error);
       alert('データの取得に失敗しました');
@@ -134,13 +135,29 @@ function App() {
               />
             </div>
 
-            <div className="flex items-end">
+            <div className="flex items-end space-x-2">
+              <div className="flex items-center">
+                <input
+                  type="checkbox"
+                  id="testMode"
+                  checked={testMode}
+                  onChange={(e) => setTestMode(e.target.checked)}
+                  className="mr-2"
+                />
+                <label htmlFor="testMode" className="text-sm text-gray-700">
+                  テストモード
+                </label>
+              </div>
               <button
                 onClick={handleFetchData}
                 disabled={isFetching || !selectedOrg || !startDate || !endDate}
-                className="w-full bg-blue-600 text-white py-3 px-4 rounded-md hover:bg-blue-700 disabled:bg-gray-400 disabled:cursor-not-allowed transition-colors"
+                className={`flex-1 py-3 px-4 rounded-md transition-colors ${
+                  testMode 
+                    ? 'bg-orange-600 hover:bg-orange-700 text-white' 
+                    : 'bg-blue-600 hover:bg-blue-700 text-white'
+                } disabled:bg-gray-400 disabled:cursor-not-allowed`}
               >
-                {isFetching ? 'データ取得中...' : 'データ取得'}
+                {isFetching ? 'データ取得中...' : `${testMode ? 'テスト' : ''}データ取得`}
               </button>
             </div>
           </div>

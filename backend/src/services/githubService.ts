@@ -127,20 +127,26 @@ export class GitHubService {
     }
   }
 
-  async getIssues(orgName: string, dateRange: DateRange): Promise<GitHubIssue[]> {
+  async getIssues(orgName: string, dateRange: DateRange, testMode: boolean = false): Promise<GitHubIssue[]> {
     const issues: GitHubIssue[] = [];
     const repos = await this.getRepositories(orgName);
 
+    // テストモードの場合は最新の3個のリポジトリのみ使用
+    const targetRepos = testMode ? repos.slice(0, 3) : repos;
+    const perPage = testMode ? 10 : 100; // テスト時は各リポジトリから10個のイシューのみ
+
+    console.log(`イシュー取得: ${targetRepos.length}個のリポジトリから、各${perPage}個ずつ`);
+
     // 並列処理でリクエスト数を削減（最大5つずつ）
     const batchSize = 5;
-    for (let i = 0; i < repos.length; i += batchSize) {
-      const batch = repos.slice(i, i + batchSize);
+    for (let i = 0; i < targetRepos.length; i += batchSize) {
+      const batch = targetRepos.slice(i, i + batchSize);
       const promises = batch.map(async (repo) => {
         try {
           return await this.makeRequest<GitHubIssue[]>(`${this.baseURL}/repos/${orgName}/${repo.name}/issues`, {
             state: 'all',
             since: dateRange.startDate,
-            per_page: 100
+            per_page: perPage
           });
         } catch (error) {
           console.error(`Error fetching issues for ${repo.name}:`, error);
@@ -156,9 +162,9 @@ export class GitHubService {
   }
 
   /**
-   * GraphQLでPR数・レビュー数を一括取得
+   * GraphQLでPR数・レビュー数を一括取得（テストモード対応）
    */
-  async getPullRequestsAndReviewsGraphQL(orgName: string, dateRange: DateRange) {
+  async getPullRequestsAndReviewsGraphQL(orgName: string, dateRange: DateRange, testMode: boolean = false) {
     // 1年分の月リストを作成
     const months: string[] = [];
     let current = moment(dateRange.startDate).startOf('month');
@@ -167,6 +173,13 @@ export class GitHubService {
       months.push(current.format('YYYY-MM'));
       current.add(1, 'month');
     }
+
+    // テストモードの場合は制限を設定
+    const repoLimit = testMode ? 3 : 50;  // テスト時は3個のリポジトリのみ
+    const prLimit = testMode ? 10 : 100;  // テスト時は各リポジトリから10個のPRのみ
+    const reviewLimit = testMode ? 5 : 50; // テスト時は各PRから5個のレビューのみ
+
+    console.log(`GraphQL取得設定: リポジトリ=${repoLimit}個, PR=${prLimit}個, レビュー=${reviewLimit}個`);
 
     // 組織のリポジトリとメンバーをGraphQLで取得
     const query = `
@@ -202,9 +215,9 @@ export class GitHubService {
     `;
     const variables = {
       org: orgName,
-      repoFirst: 50, // 取得するリポジトリ数
-      prFirst: 100,  // 各リポジトリのPR数
-      reviewFirst: 50 // 各PRのレビュー数
+      repoFirst: repoLimit,
+      prFirst: prLimit,
+      reviewFirst: reviewLimit
     };
     const res = await this.graphqlClient(query, variables);
 
@@ -241,20 +254,26 @@ export class GitHubService {
     return Object.entries(memberMap).map(([login, v]) => ({ login, ...v }));
   }
 
-  async getCommits(orgName: string, dateRange: DateRange): Promise<GitHubCommit[]> {
+  async getCommits(orgName: string, dateRange: DateRange, testMode: boolean = false): Promise<GitHubCommit[]> {
     const commits: GitHubCommit[] = [];
     const repos = await this.getRepositories(orgName);
 
+    // テストモードの場合は最新の3個のリポジトリのみ使用
+    const targetRepos = testMode ? repos.slice(0, 3) : repos;
+    const perPage = testMode ? 10 : 100; // テスト時は各リポジトリから10個のコミットのみ
+
+    console.log(`コミット取得: ${targetRepos.length}個のリポジトリから、各${perPage}個ずつ`);
+
     // 並列処理でリクエスト数を削減（最大5つずつ）
     const batchSize = 5;
-    for (let i = 0; i < repos.length; i += batchSize) {
-      const batch = repos.slice(i, i + batchSize);
+    for (let i = 0; i < targetRepos.length; i += batchSize) {
+      const batch = targetRepos.slice(i, i + batchSize);
       const promises = batch.map(async (repo) => {
         try {
           return await this.makeRequest<GitHubCommit[]>(`${this.baseURL}/repos/${orgName}/${repo.name}/commits`, {
             since: dateRange.startDate,
             until: dateRange.endDate,
-            per_page: 100
+            per_page: perPage
           });
         } catch (error) {
           console.error(`Error fetching commits for ${repo.name}:`, error);
@@ -301,18 +320,19 @@ export class GitHubService {
     return reviews;
   }
 
-  async getAllMemberActivities(orgName: string, dateRange: DateRange): Promise<MemberActivity[]> {
+  async getAllMemberActivities(orgName: string, dateRange: DateRange, testMode: boolean = false): Promise<MemberActivity[]> {
+    console.log(`=== データ取得開始 (${testMode ? 'テストモード' : '本番モード'}) ===`);
     console.log('Fetching organization members...');
     const members = await this.getOrganizationMembers(orgName);
     
     console.log('Fetching issues...');
-    const issues = await this.getIssues(orgName, dateRange);
+    const issues = await this.getIssues(orgName, dateRange, testMode);
     
-    console.log('Fetching pull requests...');
-    const pullRequests = await this.getPullRequestsAndReviewsGraphQL(orgName, dateRange);
+    console.log('Fetching pull requests and reviews...');
+    const pullRequests = await this.getPullRequestsAndReviewsGraphQL(orgName, dateRange, testMode);
     
     console.log('Fetching commits...');
-    const commits = await this.getCommits(orgName, dateRange);
+    const commits = await this.getCommits(orgName, dateRange, testMode);
     
     console.log('Fetching reviews...');
     const reviews = await this.getReviews(orgName, dateRange);
