@@ -16,21 +16,82 @@ export const api = {
     return response.data;
   },
 
-  // 保存された活動データを取得
-  getActivities: async (): Promise<{ activities: MemberActivity[]; lastUpdated: string | null }> => {
+  // 保存された活動データを取得（全組織合算）
+  getActivities: async (): Promise<{ 
+    activities: MemberActivity[]; 
+    lastUpdated: string | null;
+    organizations: { [key: string]: { count: number, lastUpdated: string | null } }
+  }> => {
     const response = await axios.get(`${API_BASE_URL}/activities`);
     return response.data;
   },
 
-  // データを取得して保存
-  fetchData: async (orgName: string, startDate: string, endDate: string, testMode: boolean = false): Promise<any> => {
-    console.log(`APIリクエスト: 組織=${orgName}, 開始日=${startDate}, 終了日=${endDate}, テストモード=${testMode}`);
+  // 特定組織の活動データを取得
+  getOrganizationActivities: async (orgName: string): Promise<{ 
+    activities: MemberActivity[]; 
+    lastUpdated: string | null;
+    organization: string;
+  }> => {
+    const response = await axios.get(`${API_BASE_URL}/activities/${orgName}`);
+    return response.data;
+  },
+
+  // データを取得して保存（組織ごと）
+  fetchData: async (orgName: string, startDate: string, endDate: string, testMode: boolean = false, targetMember?: string): Promise<any> => {
+    console.log(`APIリクエスト: 組織=${orgName}, 開始日=${startDate}, 終了日=${endDate}, テストモード=${testMode}${targetMember ? `, 対象メンバー=${targetMember}` : ''}`);
     const response = await axios.post(`${API_BASE_URL}/fetch-data`, {
       orgName,
       startDate,
       endDate,
+      testMode,
+      targetMember
+    });
+    return response.data;
+  },
+
+  // 特定メンバーのデータを取得（テスト用）
+  fetchMemberData: async (orgName: string, startDate: string, endDate: string, testMode: boolean = false, memberLogin: string = 'mm-kado'): Promise<any> => {
+    console.log(`APIリクエスト: メンバー=${memberLogin}, 組織=${orgName}, 開始日=${startDate}, 終了日=${endDate}, テストモード=${testMode}`);
+    const response = await axios.post(`${API_BASE_URL}/fetch-member-data`, {
+      orgName,
+      startDate,
+      endDate,
+      testMode,
+      memberLogin
+    });
+    return response.data;
+  },
+
+  // mm-kadoのデータを全ての組織から取得
+  fetchMmKadoAllOrgs: async (startDate: string, endDate: string, testMode: boolean = false, memberLogin: string = 'mm-kado'): Promise<any> => {
+    console.log(`APIリクエスト: メンバー=${memberLogin}, 全組織, 開始日=${startDate}, 終了日=${endDate}, テストモード=${testMode}`);
+    const response = await axios.post(`${API_BASE_URL}/fetch-mm-kado-all-orgs`, {
+      startDate,
+      endDate,
+      testMode,
+      memberLogin
+    });
+    return response.data;
+  },
+
+  // 全組織のデータを一括取得
+  fetchAllOrganizations: async (startDate: string, endDate: string, testMode: boolean = false): Promise<any> => {
+    console.log(`APIリクエスト: 全組織, 開始日=${startDate}, 終了日=${endDate}, テストモード=${testMode}`);
+    const response = await axios.post(`${API_BASE_URL}/fetch-all-organizations`, {
+      startDate,
+      endDate,
       testMode
     });
+    return response.data;
+  },
+
+  // 組織ごとの統計情報を取得
+  getOrganizationStats: async (): Promise<{
+    organizations: { [key: string]: { count: number, lastUpdated: string | null } };
+    lastUpdated: string | null;
+    totalActivities: number;
+  }> => {
+    const response = await axios.get(`${API_BASE_URL}/organizations/stats`);
     return response.data;
   },
 

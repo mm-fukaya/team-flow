@@ -48,6 +48,8 @@ export interface MemberActivity {
   login: string;
   name?: string;
   avatar_url: string;
+  organization?: string;
+  organizationDisplayName?: string;
   activities: {
     [yearMonth: string]: {
       issues: number;

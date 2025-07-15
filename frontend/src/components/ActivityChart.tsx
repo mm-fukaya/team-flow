@@ -48,6 +48,14 @@ export const ActivityChart: React.FC<ActivityChartProps> = ({
 
   const months = generateMonths(startDate, endDate);
 
+  // 組織情報を表示用に整形
+  const getOrganizationDisplay = () => {
+    if (memberActivity.organization === 'multiple') {
+      return '複数組織';
+    }
+    return memberActivity.organizationDisplayName || memberActivity.organization || '不明';
+  };
+
   const chartData = {
     labels: months.map(month => moment(month).format('YYYY年M月')),
     datasets: [
@@ -90,7 +98,7 @@ export const ActivityChart: React.FC<ActivityChartProps> = ({
       },
       title: {
         display: true,
-        text: `${memberActivity.name || memberActivity.login}の活動データ`,
+        text: `${memberActivity.name || memberActivity.login}の活動データ (${getOrganizationDisplay()})`,
       },
     },
     scales: {
@@ -103,9 +111,38 @@ export const ActivityChart: React.FC<ActivityChartProps> = ({
     },
   };
 
+  // 合計値を計算
+  const totalIssues = Object.values(memberActivity.activities).reduce((sum, data) => sum + data.issues, 0);
+  const totalPRs = Object.values(memberActivity.activities).reduce((sum, data) => sum + data.pullRequests, 0);
+  const totalCommits = Object.values(memberActivity.activities).reduce((sum, data) => sum + data.commits, 0);
+  const totalReviews = Object.values(memberActivity.activities).reduce((sum, data) => sum + data.reviews, 0);
+
   return (
-    <div style={{ width: '100%', height: '400px' }}>
-      <Bar data={chartData} options={options} />
+    <div>
+      {/* 統計情報 */}
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
+        <div className="bg-red-50 border border-red-200 rounded-lg p-4 text-center">
+          <div className="text-2xl font-bold text-red-600">{totalIssues}</div>
+          <div className="text-sm text-red-700">イシュー作成</div>
+        </div>
+        <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 text-center">
+          <div className="text-2xl font-bold text-blue-600">{totalPRs}</div>
+          <div className="text-sm text-blue-700">プルリク作成</div>
+        </div>
+        <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4 text-center">
+          <div className="text-2xl font-bold text-yellow-600">{totalCommits}</div>
+          <div className="text-sm text-yellow-700">コミット</div>
+        </div>
+        <div className="bg-teal-50 border border-teal-200 rounded-lg p-4 text-center">
+          <div className="text-2xl font-bold text-teal-600">{totalReviews}</div>
+          <div className="text-sm text-teal-700">レビュー</div>
+        </div>
+      </div>
+
+      {/* グラフ */}
+      <div style={{ width: '100%', height: '400px' }}>
+        <Bar data={chartData} options={options} />
+      </div>
     </div>
   );
 }; 

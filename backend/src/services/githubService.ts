@@ -515,10 +515,24 @@ export class GitHubService {
     return reviews;
   }
 
-  async getAllMemberActivities(orgName: string, dateRange: DateRange, testMode: boolean = false): Promise<MemberActivity[]> {
+  async getAllMemberActivities(orgName: string, dateRange: DateRange, testMode: boolean = false, targetMember?: string): Promise<MemberActivity[]> {
     console.log(`=== データ取得開始 (${testMode ? 'テストモード' : '本番モード'}) ===`);
+    if (targetMember) {
+      console.log(`特定メンバー指定: ${targetMember}`);
+    }
+    
     console.log('Fetching organization members...');
     const members = await this.getOrganizationMembers(orgName);
+    
+    // 特定のメンバーが指定されている場合、そのメンバーのみを対象とする
+    const targetMembers = targetMember 
+      ? members.filter(member => member.login === targetMember)
+      : members;
+    
+    if (targetMember && targetMembers.length === 0) {
+      console.log(`指定されたメンバー ${targetMember} が見つかりません`);
+      return [];
+    }
     
     console.log('Fetching issues...');
     const issues = await this.getIssues(orgName, dateRange, testMode);
@@ -536,7 +550,7 @@ export class GitHubService {
       const reviews = await this.getReviews(orgName, prs, dateRange);
       
       // REST APIの結果をGraphQLと同じ形式に変換
-      pullRequests = members.map(member => ({
+      pullRequests = targetMembers.map(member => ({
         login: member.login,
         name: member.name,
         avatar_url: member.avatar_url,
@@ -577,7 +591,7 @@ export class GitHubService {
     console.log('Processing member activities...');
     const memberActivities: MemberActivity[] = [];
 
-    for (const member of members) {
+    for (const member of targetMembers) {
       const activities: { [yearMonth: string]: { issues: number; pullRequests: number; commits: number; reviews: number } } = {};
 
       // イシューを月別に集計

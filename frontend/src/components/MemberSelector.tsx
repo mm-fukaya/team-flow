@@ -1,29 +1,34 @@
 import React, { useState, useEffect } from 'react';
-import { GitHubUser } from '../types';
+import { GitHubUser, Organization } from '../types';
 import { api } from '../services/api';
 
 interface MemberSelectorProps {
   selectedOrg: string;
   selectedMember: string | null;
   onMemberSelect: (member: string) => void;
+  allOrganizations?: boolean;
 }
 
 export const MemberSelector: React.FC<MemberSelectorProps> = ({
   selectedOrg,
   selectedMember,
-  onMemberSelect
+  onMemberSelect,
+  allOrganizations = false
 }) => {
   const [members, setMembers] = useState<GitHubUser[]>([]);
   const [filteredMembers, setFilteredMembers] = useState<GitHubUser[]>([]);
   const [searchTerm, setSearchTerm] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [isOpen, setIsOpen] = useState(false);
+  const [organizations, setOrganizations] = useState<Organization[]>([]);
 
   useEffect(() => {
-    if (selectedOrg) {
+    if (allOrganizations) {
+      loadAllOrganizationsMembers();
+    } else if (selectedOrg) {
       loadMembers();
     }
-  }, [selectedOrg]);
+  }, [selectedOrg, allOrganizations]);
 
   useEffect(() => {
     const filtered = members.filter(member =>
@@ -93,6 +98,87 @@ export const MemberSelector: React.FC<MemberSelectorProps> = ({
     }
   };
 
+  const loadAllOrganizationsMembers = async () => {
+    setIsLoading(true);
+    try {
+      // 組織一覧を取得
+      const orgs = await api.getOrganizations();
+      setOrganizations(orgs);
+      
+      // 全組織のメンバーを取得
+      const allMembers: GitHubUser[] = [];
+      const memberSet = new Set<string>(); // 重複を避けるため
+
+      for (const org of orgs) {
+        try {
+          const orgMembers = await api.getMembers(org.name);
+          for (const member of orgMembers) {
+            if (!memberSet.has(member.login)) {
+              memberSet.add(member.login);
+              allMembers.push(member);
+            }
+          }
+        } catch (error) {
+          console.error(`Error loading members for ${org.name}:`, error);
+        }
+      }
+
+      setMembers(allMembers);
+      
+      // メンバーが見つからない場合はデモデータを表示
+      if (allMembers.length === 0) {
+        console.log('No members found in any organization, showing demo data');
+        const demoMembers: GitHubUser[] = [
+          {
+            id: 1,
+            login: 'demo-user1',
+            name: 'Demo User 1',
+            avatar_url: 'https://avatars.githubusercontent.com/u/1?v=4'
+          },
+          {
+            id: 2,
+            login: 'demo-user2',
+            name: 'Demo User 2',
+            avatar_url: 'https://avatars.githubusercontent.com/u/2?v=4'
+          },
+          {
+            id: 3,
+            login: 'demo-user3',
+            name: 'Demo User 3',
+            avatar_url: 'https://avatars.githubusercontent.com/u/3?v=4'
+          }
+        ];
+        setMembers(demoMembers);
+      }
+    } catch (error) {
+      console.error('Error loading all organizations members:', error);
+      // エラーの場合もデモデータを表示
+      const demoMembers: GitHubUser[] = [
+        {
+          id: 1,
+          login: 'demo-user1',
+          name: 'Demo User 1',
+          avatar_url: 'https://avatars.githubusercontent.com/u/1?v=4'
+        },
+        {
+          id: 2,
+          login: 'demo-user2',
+          name: 'Demo User 2',
+          avatar_url: 'https://avatars.githubusercontent.com/u/2?v=4'
+        },
+        {
+          id: 3,
+          login: 'demo-user3',
+          name: 'Demo User 3',
+          avatar_url: 'https://avatars.githubusercontent.com/u/3?v=4'
+        }
+      ];
+      setMembers(demoMembers);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
   const handleMemberClick = (member: GitHubUser) => {
     onMemberSelect(member.login);
     setIsOpen(false);
@@ -104,7 +190,7 @@ export const MemberSelector: React.FC<MemberSelectorProps> = ({
   return (
     <div className="member-selector">
       <label className="block text-sm font-medium text-gray-700 mb-2">
-        メンバーを選択
+        {allOrganizations ? '全組織メンバーを選択' : 'メンバーを選択'}
       </label>
       <div className="relative">
         <div
