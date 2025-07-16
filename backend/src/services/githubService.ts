@@ -147,7 +147,7 @@ export class GitHubService {
     }
   }
 
-  async getIssues(orgName: string, dateRange: DateRange, testMode: boolean = false): Promise<GitHubIssue[]> {
+  async getIssues(orgName: string, dateRange: DateRange, testMode: boolean = false, targetMember?: string): Promise<GitHubIssue[]> {
     const issues: GitHubIssue[] = [];
     const repos = await this.getRepositories(orgName);
 
@@ -156,6 +156,9 @@ export class GitHubService {
     const perPage = testMode ? 10 : 100; // テスト時は各リポジトリから10個のイシューのみ
 
     console.log(`イシュー取得: ${targetRepos.length}個のリポジトリから、各${perPage}個ずつ`);
+    if (targetMember) {
+      console.log(`特定メンバー指定: ${targetMember}`);
+    }
     console.log(`期間: ${dateRange.startDate} から ${dateRange.endDate}`);
     console.log(`フィルタリング期間: ${moment(dateRange.startDate).startOf('day').format('YYYY-MM-DD HH:mm:ss')} から ${moment(dateRange.endDate).endOf('day').format('YYYY-MM-DD HH:mm:ss')}`);
 
@@ -169,20 +172,28 @@ export class GitHubService {
           let page = 1;
           let hasMore = true;
 
+          // 特定メンバーが指定されている場合は、そのメンバーのイシューのみを取得
+          const params: any = {
+            state: 'all',
+            since: dateRange.startDate,
+            per_page: perPage,
+            page: page
+          };
+          
+          if (targetMember) {
+            params.creator = targetMember;
+          }
+
           // ページネーションで全データを取得
           while (hasMore && (testMode ? page <= 1 : page <= 10)) { // テスト時は1ページ、本番時は最大10ページ
-            const repoIssues = await this.makeRequest<GitHubIssue[]>(`${this.baseURL}/repos/${orgName}/${repo.name}/issues`, {
-              state: 'all',
-              since: dateRange.startDate,
-              per_page: perPage,
-              page: page
-            });
+            const repoIssues = await this.makeRequest<GitHubIssue[]>(`${this.baseURL}/repos/${orgName}/${repo.name}/issues`, params);
             
             allRepoIssues.push(...repoIssues);
             
             // 次のページがあるかチェック
             hasMore = repoIssues.length === perPage;
             page++;
+            params.page = page;
           }
           
           // 期間内のイシューのみをフィルタリング
@@ -215,7 +226,7 @@ export class GitHubService {
   /**
    * GraphQLでPR数・レビュー数を一括取得（テストモード対応）
    */
-  async getPullRequestsAndReviewsGraphQL(orgName: string, dateRange: DateRange, testMode: boolean = false) {
+  async getPullRequestsAndReviewsGraphQL(orgName: string, dateRange: DateRange, testMode: boolean = false, targetMember?: string) {
     // 1年分の月リストを作成
     const months: string[] = [];
     let current = moment(dateRange.startDate).startOf('month');
@@ -231,10 +242,43 @@ export class GitHubService {
     const reviewLimit = testMode ? 5 : 20; // 本番時は各PRから20個のレビューに制限
 
     console.log(`GraphQL取得設定: リポジトリ=${repoLimit}個, PR=${prLimit}個, レビュー=${reviewLimit}個`);
+    if (targetMember) {
+      console.log(`特定メンバー指定: ${targetMember}`);
+    }
     console.log(`フィルタリング期間: ${moment(dateRange.startDate).startOf('day').format('YYYY-MM-DD HH:mm:ss')} から ${moment(dateRange.endDate).endOf('day').format('YYYY-MM-DD HH:mm:ss')}`);
 
-    // 組織のリポジトリとメンバーをGraphQLで取得
-    const query = `
+    // 特定メンバーが指定されている場合は、そのメンバーのPRのみを取得するクエリ
+    const query = targetMember ? `
+      query($org: String!, $repoFirst: Int!, $prFirst: Int!, $reviewFirst: Int!, $author: String!) {
+        organization(login: $org) {
+          repositories(first: $repoFirst, orderBy: {field: CREATED_AT, direction: DESC}) {
+            nodes {
+              name
+              pullRequests(first: $prFirst, orderBy: {field: CREATED_AT, direction: DESC}, author: {login: $author}) {
+                nodes {
+                  number
+                  createdAt
+                  author { login }
+                  reviews(first: $reviewFirst) {
+                    nodes {
+                      author { login }
+                      submittedAt
+                    }
+                  }
+                }
+              }
+            }
+          }
+          membersWithRole(first: 100) {
+            nodes {
+              login
+              name
+              avatarUrl
+            }
+          }
+        }
+      }
+    ` : `
       query($org: String!, $repoFirst: Int!, $prFirst: Int!, $reviewFirst: Int!) {
         organization(login: $org) {
           repositories(first: $repoFirst, orderBy: {field: CREATED_AT, direction: DESC}) {
@@ -265,7 +309,14 @@ export class GitHubService {
         }
       }
     `;
-    const variables = {
+    
+    const variables = targetMember ? {
+      org: orgName,
+      repoFirst: repoLimit,
+      prFirst: prLimit,
+      reviewFirst: reviewLimit,
+      author: targetMember
+    } : {
       org: orgName,
       repoFirst: repoLimit,
       prFirst: prLimit,
@@ -296,12 +347,27 @@ export class GitHubService {
 
     // 月ごと・メンバーごとに集計
     const memberMap: {[login: string]: {name?: string, avatar_url: string, activities: any}} = {};
-    for (const member of res.organization.membersWithRole.nodes) {
-      memberMap[member.login] = {
-        name: member.name,
-        avatar_url: member.avatarUrl,
-        activities: {}
-      };
+    
+    if (targetMember) {
+      // 特定メンバーが指定されている場合は、そのメンバーのみを対象とする
+      const targetMemberData = res.organization.membersWithRole.nodes.find(member => member.login === targetMember);
+      if (targetMemberData) {
+        memberMap[targetMember] = {
+          name: targetMemberData.name,
+          avatar_url: targetMemberData.avatarUrl,
+          activities: {}
+        };
+      }
+    } else {
+      // 全メンバーを対象とする
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      for (const member of res.organization.membersWithRole.nodes as any[]) {
+        memberMap[member.login] = {
+          name: member.name,
+          avatar_url: member.avatarUrl,
+          activities: {}
+        };
+      }
     }
     
     let totalPRs = 0;
@@ -315,12 +381,23 @@ export class GitHubService {
         const endDate = moment(dateRange.endDate).endOf('day');
         if (prDate.isBetween(startDate, endDate, 'day', '[]')) {
           const prMonth = prDate.format('YYYY-MM');
-          if (memberMap[pr.author?.login]) {
-            if (!memberMap[pr.author.login].activities[prMonth]) {
-              memberMap[pr.author.login].activities[prMonth] = { issues: 0, pullRequests: 0, commits: 0, reviews: 0 };
+          // 特定メンバーが指定されている場合は、そのメンバーのPRのみをカウント
+          if (targetMember) {
+            if (pr.author?.login === targetMember && memberMap[targetMember]) {
+              if (!memberMap[targetMember].activities[prMonth]) {
+                memberMap[targetMember].activities[prMonth] = { issues: 0, pullRequests: 0, commits: 0, reviews: 0 };
+              }
+              memberMap[targetMember].activities[prMonth].pullRequests++;
+              totalPRs++;
             }
-            memberMap[pr.author.login].activities[prMonth].pullRequests++;
-            totalPRs++;
+          } else {
+            if (memberMap[pr.author?.login]) {
+              if (!memberMap[pr.author.login].activities[prMonth]) {
+                memberMap[pr.author.login].activities[prMonth] = { issues: 0, pullRequests: 0, commits: 0, reviews: 0 };
+              }
+              memberMap[pr.author.login].activities[prMonth].pullRequests++;
+              totalPRs++;
+            }
           }
         }
         
@@ -329,12 +406,23 @@ export class GitHubService {
           // 期間内のレビューのみをカウント
           if (reviewDate.isBetween(startDate, endDate, 'day', '[]')) {
             const reviewMonth = reviewDate.format('YYYY-MM');
-            if (memberMap[review.author?.login]) {
-              if (!memberMap[review.author.login].activities[reviewMonth]) {
-                memberMap[review.author.login].activities[reviewMonth] = { issues: 0, pullRequests: 0, commits: 0, reviews: 0 };
+            // 特定メンバーが指定されている場合は、そのメンバーのレビューのみをカウント
+            if (targetMember) {
+              if (review.author?.login === targetMember && memberMap[targetMember]) {
+                if (!memberMap[targetMember].activities[reviewMonth]) {
+                  memberMap[targetMember].activities[reviewMonth] = { issues: 0, pullRequests: 0, commits: 0, reviews: 0 };
+                }
+                memberMap[targetMember].activities[reviewMonth].reviews++;
+                totalReviews++;
               }
-              memberMap[review.author.login].activities[reviewMonth].reviews++;
-              totalReviews++;
+            } else {
+              if (memberMap[review.author?.login]) {
+                if (!memberMap[review.author.login].activities[reviewMonth]) {
+                  memberMap[review.author.login].activities[reviewMonth] = { issues: 0, pullRequests: 0, commits: 0, reviews: 0 };
+                }
+                memberMap[review.author.login].activities[reviewMonth].reviews++;
+                totalReviews++;
+              }
             }
           }
         }
@@ -350,7 +438,7 @@ export class GitHubService {
   /**
    * REST APIでPR数を取得（GraphQLのフォールバック）
    */
-  async getPullRequestsREST(orgName: string, dateRange: DateRange, testMode: boolean = false): Promise<any[]> {
+  async getPullRequestsREST(orgName: string, dateRange: DateRange, testMode: boolean = false, targetMember?: string): Promise<any[]> {
     const pullRequests: any[] = [];
     const repos = await this.getRepositories(orgName);
 
@@ -359,6 +447,9 @@ export class GitHubService {
     const perPage = testMode ? 10 : 100;
 
     console.log(`REST API PR取得: ${targetRepos.length}個のリポジトリから、各${perPage}個ずつ`);
+    if (targetMember) {
+      console.log(`特定メンバー指定: ${targetMember}`);
+    }
 
     // 並列処理でリクエスト数を削減（最大10つずつ）
     const batchSize = 10;
@@ -370,19 +461,27 @@ export class GitHubService {
           let page = 1;
           let hasMore = true;
 
+          // 特定メンバーが指定されている場合は、そのメンバーのPRのみを取得
+          const params: any = {
+            state: 'all',
+            per_page: perPage,
+            page: page
+          };
+          
+          if (targetMember) {
+            params.author = targetMember;
+          }
+
           // ページネーションで全データを取得
           while (hasMore && (testMode ? page <= 1 : page <= 5)) { // テスト時は1ページ、本番時は最大5ページ
-            const repoPRs = await this.makeRequest<any[]>(`${this.baseURL}/repos/${orgName}/${repo.name}/pulls`, {
-              state: 'all',
-              per_page: perPage,
-              page: page
-            });
+            const repoPRs = await this.makeRequest<any[]>(`${this.baseURL}/repos/${orgName}/${repo.name}/pulls`, params);
             
             allRepoPRs.push(...repoPRs);
             
             // 次のページがあるかチェック
             hasMore = repoPRs.length === perPage;
             page++;
+            params.page = page;
           }
           
           // 期間内のPRのみをフィルタリング
@@ -412,7 +511,7 @@ export class GitHubService {
     return pullRequests;
   }
 
-  async getCommits(orgName: string, dateRange: DateRange, testMode: boolean = false): Promise<GitHubCommit[]> {
+  async getCommits(orgName: string, dateRange: DateRange, testMode: boolean = false, targetMember?: string): Promise<GitHubCommit[]> {
     const commits: GitHubCommit[] = [];
     const repos = await this.getRepositories(orgName);
 
@@ -421,6 +520,9 @@ export class GitHubService {
     const perPage = testMode ? 10 : 100; // テスト時は各リポジトリから10個のコミットのみ
 
     console.log(`コミット取得: ${targetRepos.length}個のリポジトリから、各${perPage}個ずつ`);
+    if (targetMember) {
+      console.log(`特定メンバー指定: ${targetMember}`);
+    }
 
     // 並列処理でリクエスト数を削減（最大10つずつ）
     const batchSize = 10;
@@ -432,20 +534,28 @@ export class GitHubService {
           let page = 1;
           let hasMore = true;
 
+          // 特定メンバーが指定されている場合は、そのメンバーのコミットのみを取得
+          const params: any = {
+            since: dateRange.startDate,
+            until: dateRange.endDate,
+            per_page: perPage,
+            page: page
+          };
+          
+          if (targetMember) {
+            params.author = targetMember;
+          }
+
           // ページネーションで全データを取得
           while (hasMore && (testMode ? page <= 1 : page <= 10)) { // テスト時は1ページ、本番時は最大10ページ
-            const repoCommits = await this.makeRequest<GitHubCommit[]>(`${this.baseURL}/repos/${orgName}/${repo.name}/commits`, {
-              since: dateRange.startDate,
-              until: dateRange.endDate,
-              per_page: perPage,
-              page: page
-            });
+            const repoCommits = await this.makeRequest<GitHubCommit[]>(`${this.baseURL}/repos/${orgName}/${repo.name}/commits`, params);
             
             allRepoCommits.push(...repoCommits);
             
             // 次のページがあるかチェック
             hasMore = repoCommits.length === perPage;
             page++;
+            params.page = page;
           }
           
           // 期間内のコミットのみをフィルタリング
@@ -535,18 +645,18 @@ export class GitHubService {
     }
     
     console.log('Fetching issues...');
-    const issues = await this.getIssues(orgName, dateRange, testMode);
+    const issues = await this.getIssues(orgName, dateRange, testMode, targetMember);
     
     console.log('Fetching pull requests and reviews...');
     let pullRequests: any[] = [];
     try {
       // まずGraphQLで試行
-      pullRequests = await this.getPullRequestsAndReviewsGraphQL(orgName, dateRange, testMode);
+      pullRequests = await this.getPullRequestsAndReviewsGraphQL(orgName, dateRange, testMode, targetMember);
       console.log('GraphQL取得成功');
     } catch (error: any) {
       console.log('GraphQL取得失敗、REST APIにフォールバック:', error.message);
       // GraphQLが失敗した場合、REST APIでPRを取得
-      const prs = await this.getPullRequestsREST(orgName, dateRange, testMode);
+      const prs = await this.getPullRequestsREST(orgName, dateRange, testMode, targetMember);
       const reviews = await this.getReviews(orgName, prs, dateRange);
       
       // REST APIの結果をGraphQLと同じ形式に変換
@@ -585,7 +695,7 @@ export class GitHubService {
     }
     
     console.log('Fetching commits...');
-    const commits = await this.getCommits(orgName, dateRange, testMode);
+    const commits = await this.getCommits(orgName, dateRange, testMode, targetMember);
     
     // レビューはGraphQLで既に取得済みのため、ここでの処理を削除
     console.log('Processing member activities...');
