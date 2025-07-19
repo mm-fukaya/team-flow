@@ -8,7 +8,6 @@ import moment from 'moment';
 
 function App() {
   const [organizations, setOrganizations] = useState<Organization[]>([]);
-  const [selectedOrg, setSelectedOrg] = useState<string>('');
   const [selectedMember, setSelectedMember] = useState<string | null>(null);
   const [startDate, setStartDate] = useState<string>('');
   const [endDate, setEndDate] = useState<string>('');
@@ -18,7 +17,6 @@ function App() {
   const [isFetching, setIsFetching] = useState(false);
   const [testMode, setTestMode] = useState(false);
   const [organizationStats, setOrganizationStats] = useState<{ [key: string]: { count: number, lastUpdated: string | null } }>({});
-  const [viewMode, setViewMode] = useState<'combined' | 'individual'>('combined');
 
   useEffect(() => {
     loadOrganizations();
@@ -37,10 +35,7 @@ function App() {
   const loadOrganizations = async () => {
     try {
       const orgs = await api.getOrganizations();
-      setOrganizations(orgs);
-      if (orgs.length > 0) {
-        setSelectedOrg(orgs[0].name);
-      }
+              setOrganizations(orgs);
     } catch (error) {
       console.error('Error loading organizations:', error);
     }
@@ -67,66 +62,6 @@ function App() {
       setOrganizationStats(stats.organizations);
     } catch (error) {
       console.error('Error loading organization stats:', error);
-    }
-  };
-
-  const handleFetchData = async () => {
-    if (!selectedOrg || !startDate || !endDate) {
-      alert('組織、開始日、終了日を選択してください');
-      return;
-    }
-
-    setIsFetching(true);
-    try {
-      await api.fetchData(selectedOrg, startDate, endDate, testMode);
-      await loadActivities();
-      await loadOrganizationStats();
-      alert(`データの取得が完了しました (${testMode ? 'テストモード' : '本番モード'})`);
-    } catch (error) {
-      console.error('Error fetching data:', error);
-      alert('データの取得に失敗しました');
-    } finally {
-      setIsFetching(false);
-    }
-  };
-
-  const handleFetchMemberData = async () => {
-    if (!selectedOrg || !startDate || !endDate) {
-      alert('組織、開始日、終了日を選択してください');
-      return;
-    }
-
-    setIsFetching(true);
-    try {
-      await api.fetchMemberData(selectedOrg, startDate, endDate, testMode, 'mm-kado');
-      await loadActivities();
-      await loadOrganizationStats();
-      alert(`mm-kadoのデータ取得が完了しました (${testMode ? 'テストモード' : '本番モード'})`);
-    } catch (error) {
-      console.error('Error fetching member data:', error);
-      alert('mm-kadoのデータ取得に失敗しました');
-    } finally {
-      setIsFetching(false);
-    }
-  };
-
-  const handleFetchMmKadoAllOrgs = async () => {
-    if (!startDate || !endDate) {
-      alert('開始日、終了日を選択してください');
-      return;
-    }
-
-    setIsFetching(true);
-    try {
-      const result = await api.fetchMmKadoAllOrgs(startDate, endDate, testMode, 'mm-kado');
-      await loadActivities();
-      await loadOrganizationStats();
-      alert(`mm-kadoの全組織データ取得が完了しました (${testMode ? 'テストモード' : '本番モード'})\n総取得数: ${result.totalCount}件`);
-    } catch (error) {
-      console.error('Error fetching mm-kado all orgs data:', error);
-      alert('mm-kadoの全組織データ取得に失敗しました');
-    } finally {
-      setIsFetching(false);
     }
   };
 
@@ -249,25 +184,7 @@ function App() {
         <div className="bg-white rounded-lg shadow-md p-6 mb-8">
           <h2 className="text-xl font-semibold text-gray-900 mb-4">設定</h2>
           
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">
-                組織
-              </label>
-              <select
-                value={selectedOrg}
-                onChange={(e) => setSelectedOrg(e.target.value)}
-                className="w-full p-3 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-              >
-                <option value="">組織を選択</option>
-                {organizations.map((org) => (
-                  <option key={org.name} value={org.name}>
-                    {org.displayName}
-                  </option>
-                ))}
-              </select>
-            </div>
-
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 mb-6">
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-2">
                 開始日
@@ -313,48 +230,12 @@ function App() {
 
           <div className="flex space-x-4 mb-4">
             <button
-              onClick={handleFetchData}
-              disabled={isFetching || !selectedOrg || !startDate || !endDate}
-              className={`py-3 px-6 rounded-md transition-colors ${
-                testMode 
-                  ? 'bg-orange-600 hover:bg-orange-700 text-white' 
-                  : 'bg-blue-600 hover:bg-blue-700 text-white'
-              } disabled:bg-gray-400 disabled:cursor-not-allowed`}
-            >
-              {isFetching ? 'データ取得中...' : `${testMode ? 'テスト' : ''}データ取得（選択組織）`}
-            </button>
-
-            <button
-              onClick={handleFetchMemberData}
-              disabled={isFetching || !selectedOrg || !startDate || !endDate}
-              className={`py-3 px-6 rounded-md transition-colors ${
-                testMode 
-                  ? 'bg-orange-600 hover:bg-orange-700 text-white' 
-                  : 'bg-purple-600 hover:bg-purple-700 text-white'
-              } disabled:bg-gray-400 disabled:cursor-not-allowed`}
-            >
-              {isFetching ? 'データ取得中...' : `${testMode ? 'テスト' : ''}mm-kadoのデータ取得`}
-            </button>
-
-            <button
-              onClick={handleFetchMmKadoAllOrgs}
-              disabled={isFetching || !startDate || !endDate}
-              className={`py-3 px-6 rounded-md transition-colors ${
-                testMode 
-                  ? 'bg-orange-600 hover:bg-orange-700 text-white' 
-                  : 'bg-purple-600 hover:bg-purple-700 text-white'
-              } disabled:bg-gray-400 disabled:cursor-not-allowed`}
-            >
-              {isFetching ? 'データ取得中...' : `${testMode ? 'テスト' : ''}mm-kadoの全組織データ取得`}
-            </button>
-
-            <button
               onClick={handleFetchAllOrganizations}
               disabled={isFetching || !startDate || !endDate}
               className={`py-3 px-6 rounded-md transition-colors ${
                 testMode 
                   ? 'bg-orange-600 hover:bg-orange-700 text-white' 
-                  : 'bg-green-600 hover:bg-green-700 text-white'
+                  : 'bg-blue-600 hover:bg-blue-700 text-white'
               } disabled:bg-gray-400 disabled:cursor-not-allowed`}
             >
               {isFetching ? 'データ取得中...' : `${testMode ? 'テスト' : ''}データ取得（全組織）`}
@@ -368,54 +249,16 @@ function App() {
           )}
         </div>
 
-        {/* 表示モード選択 */}
+        {/* 表示設定 */}
         <div className="bg-white rounded-lg shadow-md p-6 mb-8">
-          <h2 className="text-xl font-semibold text-gray-900 mb-4">表示設定</h2>
-          <div className="flex space-x-4">
-            <label className="flex items-center">
-              <input
-                type="radio"
-                value="combined"
-                checked={viewMode === 'combined'}
-                onChange={(e) => setViewMode(e.target.value as 'combined' | 'individual')}
-                className="mr-2"
-              />
-              <span className="text-sm text-gray-700">全組織合算表示</span>
-            </label>
-            <label className="flex items-center">
-              <input
-                type="radio"
-                value="individual"
-                checked={viewMode === 'individual'}
-                onChange={(e) => setViewMode(e.target.value as 'combined' | 'individual')}
-                className="mr-2"
-              />
-              <span className="text-sm text-gray-700">組織別表示</span>
-            </label>
-          </div>
+          <h2 className="text-xl font-semibold text-gray-900 mb-4">全組織メンバー選択</h2>
+          <MemberSelector
+            selectedOrg=""
+            selectedMember={selectedMember}
+            onMemberSelect={setSelectedMember}
+            allOrganizations={true}
+          />
         </div>
-
-        {selectedOrg && viewMode === 'individual' && (
-          <div className="bg-white rounded-lg shadow-md p-6 mb-8">
-            <MemberSelector
-              selectedOrg={selectedOrg}
-              selectedMember={selectedMember}
-              onMemberSelect={setSelectedMember}
-            />
-          </div>
-        )}
-
-        {viewMode === 'combined' && (
-          <div className="bg-white rounded-lg shadow-md p-6 mb-8">
-            <h2 className="text-xl font-semibold text-gray-900 mb-4">全組織メンバー選択</h2>
-            <MemberSelector
-              selectedOrg=""
-              selectedMember={selectedMember}
-              onMemberSelect={setSelectedMember}
-              allOrganizations={true}
-            />
-          </div>
-        )}
 
         {isLoading ? (
           <div className="bg-white rounded-lg shadow-md p-6 text-center">

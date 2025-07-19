@@ -46,6 +46,21 @@ export class DataService {
         return null;
       }
       const data = JSON.parse(fs.readFileSync(filePath, 'utf8'));
+      
+      // 新しい形式（macromill-activities.json形式）に対応
+      if (data.activities && Array.isArray(data.activities)) {
+        // 各メンバーのデータをMemberActivity形式に変換
+        return data.activities.map((member: any) => ({
+          login: member.login,
+          name: member.name,
+          avatar_url: member.avatar_url,
+          organization: data.organization,
+          organizationDisplayName: data.organization === 'macromill' ? 'Macromill' : data.organization,
+          activities: member.activities || {}
+        }));
+      }
+      
+      // 旧形式（MemberActivity[]形式）に対応
       return data.activities || null;
     } catch (error) {
       console.error(`Error loading activities for ${orgName}:`, error);
@@ -75,7 +90,32 @@ export class DataService {
       const allActivities: MemberActivity[] = [];
       const orgStats: { [key: string]: { count: number, lastUpdated: string | null } } = {};
 
-      // まず、all-organizationsファイルを確認
+      // 個別の組織ファイルから読み込み（優先）
+      for (const org of organizations) {
+        const orgActivities = this.loadOrganizationActivities(org.name);
+        const lastUpdated = this.getOrganizationLastUpdated(org.name);
+        
+        if (orgActivities) {
+          allActivities.push(...orgActivities);
+          orgStats[org.name] = {
+            count: orgActivities.length,
+            lastUpdated
+          };
+        } else {
+          orgStats[org.name] = {
+            count: 0,
+            lastUpdated: null
+          };
+        }
+      }
+
+      // 個別ファイルからデータが取得できた場合は、それを返す
+      if (allActivities.length > 0) {
+        console.log('Using individual organization files with', allActivities.length, 'activities');
+        return { activities: allActivities, organizations: orgStats };
+      }
+
+      // 個別ファイルからデータが取得できない場合は、all-organizationsファイルを確認
       const allOrgsFilePath = path.join(this.dataDir, 'all-organizations-activities.json');
       if (fs.existsSync(allOrgsFilePath)) {
         try {
@@ -105,25 +145,6 @@ export class DataService {
           }
         } catch (error) {
           console.error('Error reading all-organizations file:', error);
-        }
-      }
-
-      // all-organizationsファイルがない場合は、個別の組織ファイルから読み込み
-      for (const org of organizations) {
-        const orgActivities = this.loadOrganizationActivities(org.name);
-        const lastUpdated = this.getOrganizationLastUpdated(org.name);
-        
-        if (orgActivities) {
-          allActivities.push(...orgActivities);
-          orgStats[org.name] = {
-            count: orgActivities.length,
-            lastUpdated
-          };
-        } else {
-          orgStats[org.name] = {
-            count: 0,
-            lastUpdated: null
-          };
         }
       }
 

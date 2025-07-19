@@ -28,6 +28,28 @@ app.get('/api/members', async (req, res) => {
       return res.status(400).json({ error: 'Organization name is required' });
     }
 
+    // まず保存されたデータからメンバー一覧を取得
+    const savedActivities = dataService.loadOrganizationActivities(orgName);
+    if (savedActivities && savedActivities.length > 0) {
+      // 保存されたデータからメンバー一覧を作成
+      const members = savedActivities.map(activity => ({
+        id: 0, // MemberActivityにはidがないため、デフォルト値を設定
+        login: activity.login,
+        name: activity.name,
+        avatar_url: activity.avatar_url
+      }));
+      
+      // 重複を除去
+      const uniqueMembers = members.filter((member, index, self) => 
+        index === self.findIndex(m => m.login === member.login)
+      );
+      
+      console.log(`Found ${uniqueMembers.length} members from saved data for ${orgName}`);
+      return res.json(uniqueMembers);
+    }
+
+    // 保存されたデータがない場合はGitHub APIから取得
+    console.log(`No saved data found for ${orgName}, fetching from GitHub API`);
     const members = await githubService.getOrganizationMembers(orgName);
     res.json(members);
   } catch (error) {
