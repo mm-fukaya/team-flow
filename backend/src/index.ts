@@ -321,6 +321,109 @@ app.get('/api/rate-limit', async (req, res) => {
   }
 });
 
+// 週単位データ取得のAPIエンドポイントを追加
+app.get('/api/weekly-data/:orgName', (req, res) => {
+  try {
+    const { orgName } = req.params;
+    const fetchedWeeks = dataService.getFetchedWeeks(orgName);
+    
+    res.json({ 
+      organization: orgName,
+      fetchedWeeks,
+      totalWeeks: fetchedWeeks.length
+    });
+  } catch (error) {
+    console.error('Error loading weekly data:', error);
+    res.status(500).json({ error: 'Failed to load weekly data' });
+  }
+});
+
+// 週単位データを取得して保存
+app.post('/api/fetch-weekly-data', async (req, res) => {
+  try {
+    const { orgName, weekStart, weekEnd, testMode = false, forceUpdate = false } = req.body;
+
+    if (!orgName || !weekStart || !weekEnd) {
+      return res.status(400).json({ 
+        error: 'Organization name, week start, and week end are required' 
+      });
+    }
+
+    // 既に取得済みの週かチェック
+    const isAlreadyFetched = dataService.isWeekFetched(orgName, weekStart);
+    if (isAlreadyFetched && !forceUpdate) {
+      return res.status(409).json({ 
+        error: 'Week data already exists',
+        weekStart,
+        weekEnd,
+        alreadyFetched: true
+      });
+    }
+
+    const dateRange: DateRange = { startDate: weekStart, endDate: weekEnd };
+    
+    console.log(`Fetching weekly data for ${orgName} from ${weekStart} to ${weekEnd} (testMode: ${testMode}, forceUpdate: ${forceUpdate})`);
+    
+    const activities = await githubService.getAllMemberActivities(orgName, dateRange, testMode);
+    dataService.saveWeeklyActivities(orgName, weekStart, weekEnd, activities);
+
+    res.json({ 
+      message: `Weekly data fetched and saved successfully for ${orgName} (${testMode ? 'TEST MODE' : 'PRODUCTION MODE'})`,
+      count: activities.length,
+      lastUpdated: new Date().toISOString(),
+      organization: orgName,
+      weekStart,
+      weekEnd,
+      testMode,
+      forceUpdate
+    });
+  } catch (error) {
+    console.error('Error fetching weekly data:', error);
+    res.status(500).json({ error: 'Failed to fetch weekly data' });
+  }
+});
+
+// 週単位データを削除
+app.delete('/api/weekly-data/:orgName/:weekStart', (req, res) => {
+  try {
+    const { orgName, weekStart } = req.params;
+    
+    const deleted = dataService.deleteWeeklyActivities(orgName, weekStart);
+    
+    if (deleted) {
+      res.json({ 
+        message: `Weekly data deleted successfully for ${orgName} week ${weekStart}`,
+        organization: orgName,
+        weekStart
+      });
+    } else {
+      res.status(404).json({ 
+        error: 'Weekly data not found',
+        organization: orgName,
+        weekStart
+      });
+    }
+  } catch (error) {
+    console.error('Error deleting weekly data:', error);
+    res.status(500).json({ error: 'Failed to delete weekly data' });
+  }
+});
+
+// 全組織の週単位データを統合して取得
+app.get('/api/weekly-activities', (req, res) => {
+  try {
+    const { activities, organizations: orgStats } = dataService.loadAllOrganizationsWeeklyActivities();
+    
+    res.json({ 
+      activities, 
+      organizations: orgStats
+    });
+  } catch (error) {
+    console.error('Error loading weekly activities:', error);
+    res.status(500).json({ error: 'Failed to load weekly activities' });
+  }
+});
+
 app.listen(port, () => {
   console.log(`Server running on port ${port}`);
 }); 

@@ -1,10 +1,18 @@
 import React, { useState, useEffect } from 'react';
-import { Organization, MemberActivity } from './types';
-import { api } from './services/api';
-import { MemberSelector } from './components/MemberSelector';
-import { ActivityChart } from './components/ActivityChart';
-import { RateLimitDisplay } from './components/RateLimitDisplay';
 import moment from 'moment';
+import { ActivityChart } from './components/ActivityChart';
+import { MemberSelector } from './components/MemberSelector';
+import { RateLimitDisplay } from './components/RateLimitDisplay';
+import { api } from './services/api';
+import { Organization, MemberActivity } from './types';
+import './App.css';
+
+interface WeeklyData {
+  weekKey: string;
+  weekStart: string;
+  weekEnd: string;
+  lastUpdated: string;
+}
 
 function App() {
   const [organizations, setOrganizations] = useState<Organization[]>([]);
@@ -17,6 +25,14 @@ function App() {
   const [isFetching, setIsFetching] = useState(false);
   const [testMode, setTestMode] = useState(false);
   const [organizationStats, setOrganizationStats] = useState<{ [key: string]: { count: number, lastUpdated: string | null } }>({});
+  
+  // 週単位データ関連のstate
+  const [weeklyData, setWeeklyData] = useState<{ [key: string]: WeeklyData[] }>({});
+  const [selectedWeekStart, setSelectedWeekStart] = useState<string>('');
+  const [selectedWeekEnd, setSelectedWeekEnd] = useState<string>('');
+  const [isFetchingWeekly, setIsFetchingWeekly] = useState(false);
+  const [showConfirmDialog, setShowConfirmDialog] = useState(false);
+  const [confirmDialogData, setConfirmDialogData] = useState<{ orgName: string, weekStart: string, weekEnd: string } | null>(null);
 
   useEffect(() => {
     loadOrganizations();
@@ -31,6 +47,13 @@ function App() {
     setStartDate(threeMonthsAgo.format('YYYY-MM-DD'));
     setEndDate(today.format('YYYY-MM-DD'));
   }, []);
+
+  // 組織が読み込まれた後に週単位データを読み込み
+  useEffect(() => {
+    if (organizations.length > 0) {
+      loadWeeklyData();
+    }
+  }, [organizations]);
 
   const loadOrganizations = async () => {
     try {
@@ -62,6 +85,102 @@ function App() {
       setOrganizationStats(stats.organizations);
     } catch (error) {
       console.error('Error loading organization stats:', error);
+    }
+  };
+
+  // 週単位データを読み込み
+  const loadWeeklyData = async () => {
+    try {
+      const weeklyDataMap: { [key: string]: WeeklyData[] } = {};
+      
+      for (const org of organizations) {
+        try {
+          const data = await api.getWeeklyData(org.name);
+          weeklyDataMap[org.name] = data.fetchedWeeks || [];
+        } catch (error) {
+          console.error(`Error loading weekly data for ${org.name}:`, error);
+          weeklyDataMap[org.name] = [];
+        }
+      }
+      
+      setWeeklyData(weeklyDataMap);
+    } catch (error) {
+      console.error('Error loading weekly data:', error);
+    }
+  };
+
+  // 週の開始日と終了日を計算
+  const getWeekRange = (date: string) => {
+    const start = moment(date).startOf('week').format('YYYY-MM-DD');
+    const end = moment(date).endOf('week').format('YYYY-MM-DD');
+    return { start, end };
+  };
+
+  // 週単位データを取得
+  const handleFetchWeeklyData = async (orgName: string, weekStart: string, weekEnd: string, forceUpdate: boolean = false) => {
+    setIsFetchingWeekly(true);
+    try {
+      await api.fetchWeeklyData(orgName, weekStart, weekEnd, testMode, forceUpdate);
+      await loadWeeklyData();
+      await loadActivities();
+      await loadOrganizationStats();
+      alert(`週単位データの取得が完了しました (${testMode ? 'テストモード' : '本番モード'})`);
+    } catch (error: any) {
+      if (error.message === 'Week data already exists') {
+        // 既に取得済みの場合は確認ダイアログを表示
+        setConfirmDialogData({ orgName, weekStart, weekEnd });
+        setShowConfirmDialog(true);
+      } else {
+        console.error('Error fetching weekly data:', error);
+        alert('週単位データの取得に失敗しました');
+      }
+    } finally {
+      setIsFetchingWeekly(false);
+    }
+  };
+
+  // 確認ダイアログで強制更新を実行
+  const handleForceUpdate = async () => {
+    if (!confirmDialogData) return;
+    
+    setShowConfirmDialog(false);
+    setIsFetchingWeekly(true);
+    try {
+      await api.fetchWeeklyData(
+        confirmDialogData.orgName, 
+        confirmDialogData.weekStart, 
+        confirmDialogData.weekEnd, 
+        testMode, 
+        true
+      );
+      await loadWeeklyData();
+      await loadActivities();
+      await loadOrganizationStats();
+      alert(`週単位データの強制更新が完了しました (${testMode ? 'テストモード' : '本番モード'})`);
+    } catch (error) {
+      console.error('Error force updating weekly data:', error);
+      alert('週単位データの強制更新に失敗しました');
+    } finally {
+      setIsFetchingWeekly(false);
+      setConfirmDialogData(null);
+    }
+  };
+
+  // 週単位データを削除
+  const handleDeleteWeeklyData = async (orgName: string, weekStart: string) => {
+    if (!confirm(`週 ${weekStart} のデータを削除しますか？`)) {
+      return;
+    }
+    
+    try {
+      await api.deleteWeeklyData(orgName, weekStart);
+      await loadWeeklyData();
+      await loadActivities();
+      await loadOrganizationStats();
+      alert('週単位データを削除しました');
+    } catch (error) {
+      console.error('Error deleting weekly data:', error);
+      alert('週単位データの削除に失敗しました');
     }
   };
 
@@ -249,6 +368,114 @@ function App() {
           )}
         </div>
 
+        {/* 週単位データ取得 */}
+        <div className="bg-white rounded-lg shadow-md p-6 mb-8">
+          <h2 className="text-xl font-semibold text-gray-900 mb-4">週単位データ取得</h2>
+          
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                週の開始日
+              </label>
+              <input
+                type="date"
+                value={selectedWeekStart}
+                onChange={(e) => {
+                  setSelectedWeekStart(e.target.value);
+                  if (e.target.value) {
+                    const { start, end } = getWeekRange(e.target.value);
+                    setSelectedWeekStart(start);
+                    setSelectedWeekEnd(end);
+                  }
+                }}
+                className="w-full p-3 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+              />
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                週の終了日
+              </label>
+              <input
+                type="date"
+                value={selectedWeekEnd}
+                onChange={(e) => setSelectedWeekEnd(e.target.value)}
+                className="w-full p-3 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                readOnly
+              />
+            </div>
+
+            <div className="flex items-end">
+              <button
+                onClick={() => {
+                  if (selectedWeekStart && selectedWeekEnd) {
+                    organizations.forEach(org => {
+                      handleFetchWeeklyData(org.name, selectedWeekStart, selectedWeekEnd);
+                    });
+                  } else {
+                    alert('週の開始日を選択してください');
+                  }
+                }}
+                disabled={isFetchingWeekly || !selectedWeekStart || !selectedWeekEnd}
+                className={`w-full py-3 px-6 rounded-md transition-colors ${
+                  testMode 
+                    ? 'bg-orange-600 hover:bg-orange-700 text-white' 
+                    : 'bg-green-600 hover:bg-green-700 text-white'
+                } disabled:bg-gray-400 disabled:cursor-not-allowed`}
+              >
+                {isFetchingWeekly ? '取得中...' : `${testMode ? 'テスト' : ''}週単位データ取得`}
+              </button>
+            </div>
+          </div>
+
+          {/* 取得済み週一覧 */}
+          <div className="mb-6">
+            <h3 className="text-lg font-medium text-gray-900 mb-3">取得済み週一覧</h3>
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+              {organizations.map((org) => {
+                const orgWeeks = weeklyData[org.name] || [];
+                return (
+                  <div key={org.name} className="border rounded-lg p-4">
+                    <h4 className="font-semibold text-gray-900 mb-2">{org.displayName}</h4>
+                    {orgWeeks.length === 0 ? (
+                      <p className="text-sm text-gray-500">取得済みの週はありません</p>
+                    ) : (
+                      <div className="space-y-2">
+                        {orgWeeks.map((week) => (
+                          <div key={week.weekKey} className="flex items-center justify-between text-sm">
+                            <div>
+                              <div className="font-medium">{week.weekKey}</div>
+                              <div className="text-gray-500">
+                                {moment(week.weekStart).format('M/D')} - {moment(week.weekEnd).format('M/D')}
+                              </div>
+                            </div>
+                            <div className="flex space-x-2">
+                              <button
+                                onClick={() => handleFetchWeeklyData(org.name, week.weekStart, week.weekEnd, true)}
+                                className="text-blue-600 hover:text-blue-800 text-xs"
+                                title="再取得"
+                              >
+                                再取得
+                              </button>
+                              <button
+                                onClick={() => handleDeleteWeeklyData(org.name, week.weekStart)}
+                                className="text-red-600 hover:text-red-800 text-xs"
+                                title="削除"
+                              >
+                                削除
+                              </button>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        </div>
+
         {/* 表示設定 */}
         <div className="bg-white rounded-lg shadow-md p-6 mb-8">
           <h2 className="text-xl font-semibold text-gray-900 mb-4">全組織メンバー選択</h2>
@@ -312,6 +539,33 @@ function App() {
             <div className="text-gray-500">選択されたメンバーのデータが見つかりません</div>
           </div>
         ) : null}
+
+        {/* 確認ダイアログ */}
+        {showConfirmDialog && confirmDialogData && (
+          <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+            <div className="bg-white rounded-lg p-6 max-w-md w-full mx-4">
+              <h3 className="text-lg font-semibold text-gray-900 mb-4">確認</h3>
+              <p className="text-gray-700 mb-6">
+                週 {confirmDialogData.weekStart} のデータは既に取得済みです。
+                再度取得しますか？
+              </p>
+              <div className="flex space-x-4">
+                <button
+                  onClick={() => setShowConfirmDialog(false)}
+                  className="flex-1 py-2 px-4 border border-gray-300 rounded-md text-gray-700 hover:bg-gray-50"
+                >
+                  キャンセル
+                </button>
+                <button
+                  onClick={handleForceUpdate}
+                  className="flex-1 py-2 px-4 bg-blue-600 text-white rounded-md hover:bg-blue-700"
+                >
+                  再取得
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );

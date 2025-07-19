@@ -99,5 +99,37 @@ export const api = {
   getRateLimit: async (): Promise<{ rateLimitInfo: any }> => {
     const response = await axios.get(`${API_BASE_URL}/rate-limit`);
     return response.data;
+  },
+
+  // 週単位データを取得
+  async getWeeklyData(orgName: string) {
+    const response = await axios.get(`${API_BASE_URL}/weekly-data/${orgName}`);
+    return response.data;
+  },
+
+  // 週単位データを取得して保存
+  async fetchWeeklyData(orgName: string, weekStart: string, weekEnd: string, testMode: boolean = false, forceUpdate: boolean = false) {
+    const response = await axios.post(`${API_BASE_URL}/fetch-weekly-data`, {
+      orgName,
+      weekStart,
+      weekEnd,
+      testMode,
+      forceUpdate
+    });
+    
+    return response.data;
+  },
+
+  // 週単位データを削除
+  async deleteWeeklyData(orgName: string, weekStart: string) {
+    const response = await axios.delete(`${API_BASE_URL}/weekly-data/${orgName}/${weekStart}`);
+    
+    return response.data;
+  },
+
+  // 全組織の週単位データを統合して取得
+  async getWeeklyActivities() {
+    const response = await axios.get(`${API_BASE_URL}/weekly-activities`);
+    return response.data;
   }
 }; 

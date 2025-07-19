@@ -13,6 +13,7 @@
     "concurrently": "^8.2.2"
   },
   "dependencies": {
-    "@octokit/graphql": "^9.0.1"
+    "@octokit/graphql": "^9.0.1",
+    "moment": "^2.30.1"
   }
 }
