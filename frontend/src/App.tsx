@@ -3,6 +3,7 @@ import moment from 'moment';
 import { ActivityChart } from './components/ActivityChart';
 import { MemberSelector } from './components/MemberSelector';
 import { RateLimitDisplay } from './components/RateLimitDisplay';
+import { MemberActivityTable } from './components/MemberActivityTable';
 import { api } from './services/api';
 import { Organization, MemberActivity } from './types';
 
@@ -32,6 +33,10 @@ function App() {
   const [isFetchingWeekly, setIsFetchingWeekly] = useState(false);
   const [showConfirmDialog, setShowConfirmDialog] = useState(false);
   const [confirmDialogData, setConfirmDialogData] = useState<{ orgName: string, weekStart: string, weekEnd: string } | null>(null);
+  
+  // 月単位選択関連のstate
+  const [selectedMonth, setSelectedMonth] = useState<string>('');
+  const [showMemberTable, setShowMemberTable] = useState(false);
 
   useEffect(() => {
     loadOrganizations();
@@ -181,6 +186,52 @@ function App() {
       console.error('Error deleting weekly data:', error);
       alert('週単位データの削除に失敗しました');
     }
+  };
+
+  // 月単位選択の処理
+  const handleMonthChange = (month: string) => {
+    setSelectedMonth(month);
+    if (month) {
+      const startDate = moment(month).startOf('month').format('YYYY-MM-DD');
+      const endDate = moment(month).endOf('month').format('YYYY-MM-DD');
+      setStartDate(startDate);
+      setEndDate(endDate);
+      setShowMemberTable(true);
+    } else {
+      setShowMemberTable(false);
+    }
+  };
+
+  // 月単位データをフィルタリング
+  const getFilteredActivities = (): MemberActivity[] => {
+    if (!selectedMonth) return activities;
+    
+    const startDate = moment(selectedMonth).startOf('month').format('YYYY-MM-DD');
+    const endDate = moment(selectedMonth).endOf('month').format('YYYY-MM-DD');
+    
+    return activities.filter(activity => {
+      // 各メンバーの活動データから指定月のデータのみを抽出
+      const filteredActivities: { [yearMonth: string]: { issues: number; pullRequests: number; commits: number; reviews: number } } = {};
+      
+      Object.entries(activity.activities).forEach(([yearMonth, data]) => {
+        const activityDate = moment(yearMonth, 'YYYY-MM');
+        const monthStart = moment(startDate);
+        const monthEnd = moment(endDate);
+        
+        if (activityDate.isBetween(monthStart, monthEnd, 'month', '[]')) {
+          filteredActivities[yearMonth] = data;
+        }
+      });
+      
+      // フィルタリングされたデータがある場合のみ返す
+      if (Object.keys(filteredActivities).length > 0) {
+        return {
+          ...activity,
+          activities: filteredActivities
+        };
+      }
+      return false;
+    });
   };
 
   const handleFetchAllOrganizations = async () => {
@@ -474,6 +525,56 @@ function App() {
             </div>
           </div>
         </div>
+
+        {/* 月単位選択 */}
+        <div className="bg-white rounded-lg shadow-md p-6 mb-8">
+          <h2 className="text-xl font-semibold text-gray-900 mb-4">月単位データ表示</h2>
+          
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                表示月を選択
+              </label>
+              <input
+                type="month"
+                value={selectedMonth}
+                onChange={(e) => handleMonthChange(e.target.value)}
+                className="w-full p-3 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+              />
+            </div>
+            
+            <div className="flex items-end">
+              <button
+                onClick={() => setShowMemberTable(!showMemberTable)}
+                disabled={!selectedMonth}
+                className={`w-full py-3 px-6 rounded-md transition-colors ${
+                  showMemberTable 
+                    ? 'bg-gray-600 hover:bg-gray-700 text-white' 
+                    : 'bg-blue-600 hover:bg-blue-700 text-white'
+                } disabled:bg-gray-400 disabled:cursor-not-allowed`}
+              >
+                {showMemberTable ? 'メンバーテーブルを非表示' : 'メンバーテーブルを表示'}
+              </button>
+            </div>
+          </div>
+          
+          {selectedMonth && (
+            <div className="text-sm text-gray-600">
+              選択月: {moment(selectedMonth).format('YYYY年M月')}
+            </div>
+          )}
+        </div>
+
+        {/* 全メンバー活動テーブル */}
+        {showMemberTable && selectedMonth && (
+          <div className="mb-8">
+            <MemberActivityTable
+              activities={getFilteredActivities()}
+              startDate={moment(selectedMonth).startOf('month').format('YYYY-MM-DD')}
+              endDate={moment(selectedMonth).endOf('month').format('YYYY-MM-DD')}
+            />
+          </div>
+        )}
 
         {/* 表示設定 */}
         <div className="bg-white rounded-lg shadow-md p-6 mb-8">
