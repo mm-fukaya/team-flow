@@ -190,6 +190,7 @@ function App() {
 
   // 月単位選択の処理
   const handleMonthChange = (month: string) => {
+    console.log('Month changed to:', month);
     setSelectedMonth(month);
     if (month) {
       const startDate = moment(month).startOf('month').format('YYYY-MM-DD');
@@ -197,6 +198,10 @@ function App() {
       setStartDate(startDate);
       setEndDate(endDate);
       setShowMemberTable(true);
+      
+      // データを再読み込み
+      loadActivities();
+      loadWeeklyData();
     } else {
       setShowMemberTable(false);
     }
@@ -209,9 +214,14 @@ function App() {
     const startDate = moment(selectedMonth).startOf('month').format('YYYY-MM-DD');
     const endDate = moment(selectedMonth).endOf('month').format('YYYY-MM-DD');
     
-    return activities.filter(activity => {
+    console.log('Filtering activities for month:', selectedMonth);
+    console.log('Date range:', startDate, 'to', endDate);
+    
+    const filteredActivities: MemberActivity[] = [];
+    
+    activities.forEach(activity => {
       // 各メンバーの活動データから指定月のデータのみを抽出
-      const filteredActivities: { [yearMonth: string]: { issues: number; pullRequests: number; commits: number; reviews: number } } = {};
+      const filteredMonthData: { [yearMonth: string]: { issues: number; pullRequests: number; commits: number; reviews: number } } = {};
       
       Object.entries(activity.activities).forEach(([yearMonth, data]) => {
         const activityDate = moment(yearMonth, 'YYYY-MM');
@@ -219,19 +229,23 @@ function App() {
         const monthEnd = moment(endDate);
         
         if (activityDate.isBetween(monthStart, monthEnd, 'month', '[]')) {
-          filteredActivities[yearMonth] = data;
+          filteredMonthData[yearMonth] = data;
+          console.log(`Including ${yearMonth} data for ${activity.login}:`, data);
         }
       });
       
-      // フィルタリングされたデータがある場合のみ返す
-      if (Object.keys(filteredActivities).length > 0) {
-        return {
+      // フィルタリングされたデータがある場合のみ追加
+      if (Object.keys(filteredMonthData).length > 0) {
+        filteredActivities.push({
           ...activity,
-          activities: filteredActivities
-        };
+          activities: filteredMonthData
+        });
+        console.log(`Added filtered data for ${activity.login}:`, filteredMonthData);
       }
-      return false;
     });
+    
+    console.log('Filtered activities count:', filteredActivities.length);
+    return filteredActivities;
   };
 
   const handleFetchAllOrganizations = async () => {

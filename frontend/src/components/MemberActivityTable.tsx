@@ -22,12 +22,23 @@ export const MemberActivityTable: React.FC<MemberActivityTableProps> = ({
   startDate,
   endDate
 }) => {
+  console.log('MemberActivityTable received activities:', activities);
+  console.log('Date range:', startDate, 'to', endDate);
+  
   // メンバーごとの合計を計算
   const memberSummaries: MemberSummary[] = activities.map(activity => {
     const totalIssues = Object.values(activity.activities).reduce((sum, data) => sum + data.issues, 0);
     const totalPullRequests = Object.values(activity.activities).reduce((sum, data) => sum + data.pullRequests, 0);
     const totalCommits = Object.values(activity.activities).reduce((sum, data) => sum + data.commits, 0);
     const totalReviews = Object.values(activity.activities).reduce((sum, data) => sum + data.reviews, 0);
+
+    console.log(`Member ${activity.login} totals:`, {
+      issues: totalIssues,
+      pullRequests: totalPullRequests,
+      commits: totalCommits,
+      reviews: totalReviews,
+      activities: activity.activities
+    });
 
     return {
       login: activity.login,
