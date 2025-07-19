@@ -324,6 +324,7 @@ function App() {
               {isFetching ? 'データ取得中...' : `${testMode ? 'テスト' : ''}データ取得（選択組織）`}
             </button>
 
+            {/* mm-kado専用ボタン（デモ用に非表示）
             <button
               onClick={handleFetchMemberData}
               disabled={isFetching || !selectedOrg || !startDate || !endDate}
@@ -347,6 +348,7 @@ function App() {
             >
               {isFetching ? 'データ取得中...' : `${testMode ? 'テスト' : ''}mm-kadoの全組織データ取得`}
             </button>
+            */}
 
             <button
               onClick={handleFetchAllOrganizations}

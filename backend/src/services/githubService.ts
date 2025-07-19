@@ -236,60 +236,42 @@ export class GitHubService {
       current.add(1, 'month');
     }
 
-    // テストモードの場合は制限を設定
-    const repoLimit = testMode ? 3 : 20;   // 本番時は20個のリポジトリに制限
-    const prLimit = testMode ? 10 : 50;    // 本番時は各リポジトリから50個のPRに制限
-    const reviewLimit = testMode ? 5 : 20; // 本番時は各PRから20個のレビューに制限
+    // テストモードの場合は制限を設定（本番時は制限なしで全データ取得）
+    const repoLimit = testMode ? 3 : 100;   // 本番時は100個のリポジトリを一度に取得
+    const prLimit = testMode ? 10 : 100;    // 本番時は各リポジトリから100個のPRを一度に取得
+    const reviewLimit = testMode ? 5 : 100; // 本番時は各PRから100個のレビューを一度に取得
 
-    console.log(`GraphQL取得設定: リポジトリ=${repoLimit}個, PR=${prLimit}個, レビュー=${reviewLimit}個`);
+    console.log(`GraphQL取得設定: リポジトリ=${repoLimit}個/回, PR=${prLimit}個/回, レビュー=${reviewLimit}個/回 (ページネーション対応)`);
     if (targetMember) {
       console.log(`特定メンバー指定: ${targetMember}`);
     }
     console.log(`フィルタリング期間: ${moment(dateRange.startDate).startOf('day').format('YYYY-MM-DD HH:mm:ss')} から ${moment(dateRange.endDate).endOf('day').format('YYYY-MM-DD HH:mm:ss')}`);
 
-    // 特定メンバーが指定されている場合は、そのメンバーのPRのみを取得するクエリ
-    const query = targetMember ? `
-      query($org: String!, $repoFirst: Int!, $prFirst: Int!, $reviewFirst: Int!, $author: String!) {
+    // ページネーション対応のGraphQLクエリ
+    const query = `
+      query($org: String!, $repoFirst: Int!, $repoAfter: String, $prFirst: Int!, $prAfter: String, $reviewFirst: Int!, $reviewAfter: String) {
         organization(login: $org) {
-          repositories(first: $repoFirst, orderBy: {field: CREATED_AT, direction: DESC}) {
+          repositories(first: $repoFirst, after: $repoAfter, orderBy: {field: UPDATED_AT, direction: DESC}) {
+            pageInfo {
+              hasNextPage
+              endCursor
+            }
             nodes {
               name
-              pullRequests(first: $prFirst, orderBy: {field: CREATED_AT, direction: DESC}, author: {login: $author}) {
-                nodes {
-                  number
-                  createdAt
-                  author { login }
-                  reviews(first: $reviewFirst) {
-                    nodes {
-                      author { login }
-                      submittedAt
-                    }
-                  }
+              pullRequests(first: $prFirst, after: $prAfter, orderBy: {field: UPDATED_AT, direction: DESC}) {
+                pageInfo {
+                  hasNextPage
+                  endCursor
                 }
-              }
-            }
-          }
-          membersWithRole(first: 100) {
-            nodes {
-              login
-              name
-              avatarUrl
-            }
-          }
-        }
-      }
-    ` : `
-      query($org: String!, $repoFirst: Int!, $prFirst: Int!, $reviewFirst: Int!) {
-        organization(login: $org) {
-          repositories(first: $repoFirst, orderBy: {field: CREATED_AT, direction: DESC}) {
-            nodes {
-              name
-              pullRequests(first: $prFirst, orderBy: {field: CREATED_AT, direction: DESC}) {
                 nodes {
                   number
                   createdAt
                   author { login }
-                  reviews(first: $reviewFirst) {
+                  reviews(first: $reviewFirst, after: $reviewAfter, orderBy: {field: CREATED_AT, direction: DESC}) {
+                    pageInfo {
+                      hasNextPage
+                      endCursor
+                    }
                     nodes {
                       author { login }
                       submittedAt
@@ -309,127 +291,249 @@ export class GitHubService {
         }
       }
     `;
-    
-    const variables = targetMember ? {
-      org: orgName,
-      repoFirst: repoLimit,
-      prFirst: prLimit,
-      reviewFirst: reviewLimit,
-      author: targetMember
-    } : {
-      org: orgName,
-      repoFirst: repoLimit,
-      prFirst: prLimit,
-      reviewFirst: reviewLimit
-    };
-    let res;
-    let retryCount = 0;
-    const maxRetries = 3;
-    
-    while (retryCount < maxRetries) {
-      try {
-        res = await this.graphqlClient(query, variables);
-        break;
-      } catch (error: any) {
-        retryCount++;
-        console.log(`GraphQL request failed (attempt ${retryCount}/${maxRetries}):`, error.message);
-        
-        if (retryCount >= maxRetries) {
-          throw error;
-        }
-        
-        // 指数バックオフで待機
-        const waitTime = Math.pow(2, retryCount) * 1000;
-        console.log(`Waiting ${waitTime}ms before retry...`);
-        await new Promise(resolve => setTimeout(resolve, waitTime));
-      }
-    }
 
     // 月ごと・メンバーごとに集計
     const memberMap: {[login: string]: {name?: string, avatar_url: string, activities: any}} = {};
     
-    if (targetMember) {
-      // 特定メンバーが指定されている場合は、そのメンバーのみを対象とする
-      const targetMemberData = res.organization.membersWithRole.nodes.find(member => member.login === targetMember);
-      if (targetMemberData) {
-        memberMap[targetMember] = {
-          name: targetMemberData.name,
-          avatar_url: targetMemberData.avatarUrl,
-          activities: {}
-        };
-      }
-    } else {
-      // 全メンバーを対象とする
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      for (const member of res.organization.membersWithRole.nodes as any[]) {
-        memberMap[member.login] = {
-          name: member.name,
-          avatar_url: member.avatarUrl,
-          activities: {}
-        };
-      }
+    // 全メンバーを対象とする
+    const allMembers = await this.getOrganizationMembers(orgName);
+    for (const member of allMembers) {
+      memberMap[member.login] = {
+        name: member.name,
+        avatar_url: member.avatar_url,
+        activities: {}
+      };
     }
     
     let totalPRs = 0;
     let totalReviews = 0;
-    
-    for (const repo of res.organization.repositories.nodes) {
-      for (const pr of repo.pullRequests.nodes) {
-        const prDate = moment(pr.createdAt);
-        // 期間内のPRのみをカウント
-        const startDate = moment(dateRange.startDate).startOf('day');
-        const endDate = moment(dateRange.endDate).endOf('day');
-        if (prDate.isBetween(startDate, endDate, 'day', '[]')) {
-          const prMonth = prDate.format('YYYY-MM');
-          // 特定メンバーが指定されている場合は、そのメンバーのPRのみをカウント
-          if (targetMember) {
-            if (pr.author?.login === targetMember && memberMap[targetMember]) {
-              if (!memberMap[targetMember].activities[prMonth]) {
-                memberMap[targetMember].activities[prMonth] = { issues: 0, pullRequests: 0, commits: 0, reviews: 0 };
-              }
-              memberMap[targetMember].activities[prMonth].pullRequests++;
-              totalPRs++;
-            }
-          } else {
-            if (memberMap[pr.author?.login]) {
-              if (!memberMap[pr.author.login].activities[prMonth]) {
-                memberMap[pr.author.login].activities[prMonth] = { issues: 0, pullRequests: 0, commits: 0, reviews: 0 };
-              }
-              memberMap[pr.author.login].activities[prMonth].pullRequests++;
-              totalPRs++;
-            }
+    let totalRepos = 0;
+    let repoCursor: string | null = null;
+    let hasMoreRepos = true;
+    let repoPageCount = 0;
+    const maxRepoPages = testMode ? 1 : 50; // 最大50ページ（5000個のリポジトリ）
+
+    console.log('=== リポジトリ取得開始 ===');
+
+    // リポジトリのページネーション（制限なしで全リポジトリを取得）
+    while (hasMoreRepos && repoPageCount < maxRepoPages) {
+      const variables: any = {
+        org: orgName,
+        repoFirst: repoLimit,
+        repoAfter: repoCursor,
+        prFirst: prLimit,
+        prAfter: null,
+        reviewFirst: reviewLimit,
+        reviewAfter: null
+      };
+
+      let res;
+      let retryCount = 0;
+      const maxRetries = 3;
+      
+      while (retryCount < maxRetries) {
+        try {
+          res = await this.graphqlClient(query, variables);
+          break;
+        } catch (error: any) {
+          retryCount++;
+          console.log(`GraphQL request failed (attempt ${retryCount}/${maxRetries}):`, error.message);
+          
+          if (retryCount >= maxRetries) {
+            throw error;
           }
-        }
-        
-        for (const review of pr.reviews.nodes) {
-          const reviewDate = moment(review.submittedAt);
-          // 期間内のレビューのみをカウント
-          if (reviewDate.isBetween(startDate, endDate, 'day', '[]')) {
-            const reviewMonth = reviewDate.format('YYYY-MM');
-            // 特定メンバーが指定されている場合は、そのメンバーのレビューのみをカウント
-            if (targetMember) {
-              if (review.author?.login === targetMember && memberMap[targetMember]) {
-                if (!memberMap[targetMember].activities[reviewMonth]) {
-                  memberMap[targetMember].activities[reviewMonth] = { issues: 0, pullRequests: 0, commits: 0, reviews: 0 };
-                }
-                memberMap[targetMember].activities[reviewMonth].reviews++;
-                totalReviews++;
-              }
-            } else {
-              if (memberMap[review.author?.login]) {
-                if (!memberMap[review.author.login].activities[reviewMonth]) {
-                  memberMap[review.author.login].activities[reviewMonth] = { issues: 0, pullRequests: 0, commits: 0, reviews: 0 };
-                }
-                memberMap[review.author.login].activities[reviewMonth].reviews++;
-                totalReviews++;
-              }
-            }
-          }
+          
+          // 指数バックオフで待機
+          const waitTime = Math.pow(2, retryCount) * 1000;
+          console.log(`Waiting ${waitTime}ms before retry...`);
+          await new Promise(resolve => setTimeout(resolve, waitTime));
         }
       }
+
+      if (!res?.organization?.repositories) {
+        console.log('No repositories found or GraphQL error');
+        break;
+      }
+
+      const repos = res.organization.repositories.nodes;
+      const repoPageInfo: any = res.organization.repositories.pageInfo;
+      
+      totalRepos += repos.length;
+      repoPageCount++;
+      console.log(`リポジトリページ ${repoPageCount}: ${repos.length}個取得 (累計: ${totalRepos}個)`);
+
+      // 各リポジトリのPRを処理
+      for (const repo of repos) {
+        if (!repo.pullRequests) continue;
+
+        let prCursor: string | null = null;
+        let hasMorePRs = true;
+        let prPageCount = 0;
+        let repoPRCount = 0;
+        const maxPRPages = testMode ? 1 : 50; // 最大50ページ（5000個のPR）
+
+        console.log(`  ${repo.name}: PR取得開始`);
+
+        // PRのページネーション（制限なしで全PRを取得）
+        while (hasMorePRs && prPageCount < maxPRPages) {
+          const prVariables: any = {
+            org: orgName,
+            repoFirst: 1,
+            repoAfter: null,
+            prFirst: prLimit,
+            prAfter: prCursor,
+            reviewFirst: reviewLimit,
+            reviewAfter: null
+          };
+
+          let prRes;
+          try {
+            prRes = await this.graphqlClient(query, prVariables);
+          } catch (error: any) {
+            console.log(`PR GraphQL request failed for ${repo.name}:`, error.message);
+            break;
+          }
+
+          if (!prRes?.organization?.repositories?.nodes?.[0]?.pullRequests) {
+            break;
+          }
+
+          const prs = prRes.organization.repositories.nodes[0].pullRequests.nodes;
+          const prPageInfo: any = prRes.organization.repositories.nodes[0].pullRequests.pageInfo;
+
+          repoPRCount += prs.length;
+          prPageCount++;
+          console.log(`    PRページ ${prPageCount}: ${prs.length}個取得 (累計: ${repoPRCount}個)`);
+
+          // 各PRのレビューを処理
+          for (const pr of prs) {
+            const prDate = moment(pr.createdAt);
+            // 期間内のPRのみをカウント
+            const startDate = moment(dateRange.startDate).startOf('day');
+            const endDate = moment(dateRange.endDate).endOf('day');
+            
+            if (prDate.isBetween(startDate, endDate, 'day', '[]')) {
+              const prMonth = prDate.format('YYYY-MM');
+              
+              // 特定メンバーが指定されている場合は、そのメンバーのPRのみをカウント
+              if (targetMember) {
+                if (pr.author?.login === targetMember && memberMap[targetMember]) {
+                  if (!memberMap[targetMember].activities[prMonth]) {
+                    memberMap[targetMember].activities[prMonth] = { issues: 0, pullRequests: 0, commits: 0, reviews: 0 };
+                  }
+                  memberMap[targetMember].activities[prMonth].pullRequests++;
+                  totalPRs++;
+                }
+              } else {
+                if (memberMap[pr.author?.login]) {
+                  if (!memberMap[pr.author.login].activities[prMonth]) {
+                    memberMap[pr.author.login].activities[prMonth] = { issues: 0, pullRequests: 0, commits: 0, reviews: 0 };
+                  }
+                  memberMap[pr.author.login].activities[prMonth].pullRequests++;
+                  totalPRs++;
+                }
+              }
+            }
+
+            // レビューの処理
+            if (pr.reviews) {
+              let reviewCursor: string | null = null;
+              let hasMoreReviews = true;
+              let reviewPageCount = 0;
+              let prReviewCount = 0;
+              const maxReviewPages = testMode ? 1 : 20; // 最大20ページ（2000個のレビュー）
+
+              // レビューのページネーション（制限なしで全レビューを取得）
+              while (hasMoreReviews && reviewPageCount < maxReviewPages) {
+                const reviewVariables: any = {
+                  org: orgName,
+                  repoFirst: 1,
+                  repoAfter: null,
+                  prFirst: 1,
+                  prAfter: null,
+                  reviewFirst: reviewLimit,
+                  reviewAfter: reviewCursor
+                };
+
+                let reviewRes;
+                try {
+                  reviewRes = await this.graphqlClient(query, reviewVariables);
+                } catch (error: any) {
+                  console.log(`Review GraphQL request failed for PR #${pr.number}:`, error.message);
+                  break;
+                }
+
+                if (!reviewRes?.organization?.repositories?.nodes?.[0]?.pullRequests?.nodes?.[0]?.reviews) {
+                  break;
+                }
+
+                const reviews = reviewRes.organization.repositories.nodes[0].pullRequests.nodes[0].reviews.nodes;
+                const reviewPageInfo: any = reviewRes.organization.repositories.nodes[0].pullRequests.nodes[0].reviews.pageInfo;
+
+                prReviewCount += reviews.length;
+                reviewPageCount++;
+
+                for (const review of reviews) {
+                  const reviewDate = moment(review.submittedAt);
+                  // 期間内のレビューのみをカウント
+                  if (reviewDate.isBetween(startDate, endDate, 'day', '[]')) {
+                    const reviewMonth = reviewDate.format('YYYY-MM');
+                    
+                    // 特定メンバーが指定されている場合は、そのメンバーのレビューのみをカウント
+                    if (targetMember) {
+                      if (review.author?.login === targetMember && memberMap[targetMember]) {
+                        if (!memberMap[targetMember].activities[reviewMonth]) {
+                          memberMap[targetMember].activities[reviewMonth] = { issues: 0, pullRequests: 0, commits: 0, reviews: 0 };
+                        }
+                        memberMap[targetMember].activities[reviewMonth].reviews++;
+                        totalReviews++;
+                      }
+                    } else {
+                      if (memberMap[review.author?.login]) {
+                        if (!memberMap[review.author.login].activities[reviewMonth]) {
+                          memberMap[review.author.login].activities[reviewMonth] = { issues: 0, pullRequests: 0, commits: 0, reviews: 0 };
+                        }
+                        memberMap[review.author.login].activities[reviewMonth].reviews++;
+                        totalReviews++;
+                      }
+                    }
+                  }
+                }
+
+                hasMoreReviews = reviewPageInfo.hasNextPage;
+                reviewCursor = reviewPageInfo.endCursor;
+
+                // レート制限を避けるため少し待機
+                await new Promise(resolve => setTimeout(resolve, 100));
+              }
+
+              if (prReviewCount > 0) {
+                console.log(`      PR #${pr.number}: レビュー ${prReviewCount}個取得 (${reviewPageCount}ページ)`);
+              }
+            }
+          }
+
+          hasMorePRs = prPageInfo.hasNextPage;
+          prCursor = prPageInfo.endCursor;
+
+          // レート制限を避けるため少し待機
+          await new Promise(resolve => setTimeout(resolve, 100));
+        }
+
+        console.log(`  ${repo.name}: PR ${repoPRCount}個取得完了 (${prPageCount}ページ)`);
+      }
+
+      hasMoreRepos = repoPageInfo.hasNextPage;
+      repoCursor = repoPageInfo.endCursor;
+
+      // レート制限を避けるため少し待機
+      await new Promise(resolve => setTimeout(resolve, 200));
     }
     
-    console.log(`GraphQL取得結果: PR=${totalPRs}個, レビュー=${totalReviews}個`);
+    console.log('=== 取得完了 ===');
+    console.log(`総リポジトリ数: ${totalRepos}個 (${repoPageCount}ページ)`);
+    console.log(`総PR数: ${totalPRs}個`);
+    console.log(`総レビュー数: ${totalReviews}個`);
     
     // MemberActivity[]形式に変換
     return Object.entries(memberMap).map(([login, v]) => ({ login, ...v }));
@@ -443,13 +547,16 @@ export class GitHubService {
     const repos = await this.getRepositories(orgName);
 
     // テストモードの場合は最新の3個のリポジトリのみ使用
-    const targetRepos = testMode ? repos.slice(0, 3) : repos.slice(0, 20); // 本番時は20個のリポジトリに制限
+    const targetRepos = testMode ? repos.slice(0, 3) : repos; // 制限なしで全リポジトリを取得
     const perPage = testMode ? 10 : 100;
 
-    console.log(`REST API PR取得: ${targetRepos.length}個のリポジトリから、各${perPage}個ずつ`);
+    console.log(`REST API PR取得: ${targetRepos.length}個のリポジトリから、各${perPage}個ずつ (ページネーション対応)`);
     if (targetMember) {
       console.log(`特定メンバー指定: ${targetMember}`);
     }
+
+    let totalRepos = 0;
+    let totalPRs = 0;
 
     // 並列処理でリクエスト数を削減（最大10つずつ）
     const batchSize = 10;
@@ -460,6 +567,8 @@ export class GitHubService {
           let allRepoPRs: any[] = [];
           let page = 1;
           let hasMore = true;
+          let repoPRCount = 0;
+          const maxPages = testMode ? 1 : 50; // 最大50ページ（5000個のPR）
 
           // 特定メンバーが指定されている場合は、そのメンバーのPRのみを取得
           const params: any = {
@@ -472,16 +581,24 @@ export class GitHubService {
             params.author = targetMember;
           }
 
+          console.log(`  ${repo.name}: PR取得開始`);
+
           // ページネーションで全データを取得
-          while (hasMore && (testMode ? page <= 1 : page <= 5)) { // テスト時は1ページ、本番時は最大5ページ
+          while (hasMore && page <= maxPages) {
             const repoPRs = await this.makeRequest<any[]>(`${this.baseURL}/repos/${orgName}/${repo.name}/pulls`, params);
             
             allRepoPRs.push(...repoPRs);
+            repoPRCount += repoPRs.length;
+            
+            console.log(`    ${repo.name}: PRページ ${page}: ${repoPRs.length}個取得 (累計: ${repoPRCount}個)`);
             
             // 次のページがあるかチェック
             hasMore = repoPRs.length === perPage;
             page++;
             params.page = page;
+
+            // レート制限を避けるため少し待機
+            await new Promise(resolve => setTimeout(resolve, 100));
           }
           
           // 期間内のPRのみをフィルタリング
@@ -492,7 +609,7 @@ export class GitHubService {
             return prDate.isBetween(startDate, endDate, 'day', '[]');
           });
           
-          console.log(`${repo.name}: ${allRepoPRs.length}個取得、${filteredPRs.length}個が期間内`);
+          console.log(`  ${repo.name}: ${allRepoPRs.length}個取得、${filteredPRs.length}個が期間内 (${page - 1}ページ)`);
           return filteredPRs;
         } catch (error: any) {
           console.error(`Error fetching PRs for ${repo.name}:`, error);
@@ -505,9 +622,13 @@ export class GitHubService {
 
       const results = await Promise.all(promises);
       results.forEach(result => pullRequests.push(...result));
+      
+      totalRepos += batch.length;
+      totalPRs += pullRequests.length;
+      console.log(`バッチ処理完了: ${totalRepos}/${targetRepos.length} リポジトリ (累計PR: ${totalPRs}個)`);
     }
 
-    console.log(`総PR数: ${pullRequests.length}個`);
+    console.log(`REST API取得完了: 総PR数: ${pullRequests.length}個`);
     return pullRequests;
   }
 
@@ -516,13 +637,16 @@ export class GitHubService {
     const repos = await this.getRepositories(orgName);
 
     // テストモードの場合は最新の3個のリポジトリのみ使用
-    const targetRepos = testMode ? repos.slice(0, 3) : repos;
+    const targetRepos = testMode ? repos.slice(0, 3) : repos; // 制限なしで全リポジトリを取得
     const perPage = testMode ? 10 : 100; // テスト時は各リポジトリから10個のコミットのみ
 
-    console.log(`コミット取得: ${targetRepos.length}個のリポジトリから、各${perPage}個ずつ`);
+    console.log(`コミット取得: ${targetRepos.length}個のリポジトリから、各${perPage}個ずつ (ページネーション対応)`);
     if (targetMember) {
       console.log(`特定メンバー指定: ${targetMember}`);
     }
+
+    let totalRepos = 0;
+    let totalCommits = 0;
 
     // 並列処理でリクエスト数を削減（最大10つずつ）
     const batchSize = 10;
@@ -533,6 +657,8 @@ export class GitHubService {
           let allRepoCommits: GitHubCommit[] = [];
           let page = 1;
           let hasMore = true;
+          let repoCommitCount = 0;
+          const maxPages = testMode ? 1 : 50; // 最大50ページ（5000個のコミット）
 
           // 特定メンバーが指定されている場合は、そのメンバーのコミットのみを取得
           const params: any = {
@@ -546,16 +672,24 @@ export class GitHubService {
             params.author = targetMember;
           }
 
+          console.log(`  ${repo.name}: コミット取得開始`);
+
           // ページネーションで全データを取得
-          while (hasMore && (testMode ? page <= 1 : page <= 10)) { // テスト時は1ページ、本番時は最大10ページ
+          while (hasMore && page <= maxPages) {
             const repoCommits = await this.makeRequest<GitHubCommit[]>(`${this.baseURL}/repos/${orgName}/${repo.name}/commits`, params);
             
             allRepoCommits.push(...repoCommits);
+            repoCommitCount += repoCommits.length;
+            
+            console.log(`    ${repo.name}: コミットページ ${page}: ${repoCommits.length}個取得 (累計: ${repoCommitCount}個)`);
             
             // 次のページがあるかチェック
             hasMore = repoCommits.length === perPage;
             page++;
             params.page = page;
+
+            // レート制限を避けるため少し待機
+            await new Promise(resolve => setTimeout(resolve, 100));
           }
           
           // 期間内のコミットのみをフィルタリング
@@ -566,7 +700,7 @@ export class GitHubService {
             return commitDate.isBetween(startDate, endDate, 'day', '[]');
           });
           
-          console.log(`${repo.name}: ${allRepoCommits.length}個取得、${filteredCommits.length}個が期間内`);
+          console.log(`  ${repo.name}: ${allRepoCommits.length}個取得、${filteredCommits.length}個が期間内 (${page - 1}ページ)`);
           return filteredCommits;
         } catch (error: any) {
           console.error(`Error fetching commits for ${repo.name}:`, error);
@@ -579,14 +713,23 @@ export class GitHubService {
 
       const results = await Promise.all(promises);
       results.forEach(result => commits.push(...result));
+      
+      totalRepos += batch.length;
+      totalCommits += commits.length;
+      console.log(`バッチ処理完了: ${totalRepos}/${targetRepos.length} リポジトリ (累計コミット: ${totalCommits}個)`);
     }
 
-    console.log(`総コミット数: ${commits.length}個`);
+    console.log(`コミット取得完了: 総コミット数: ${commits.length}個`);
     return commits;
   }
 
   async getReviews(orgName: string, pullRequests: any[], dateRange: DateRange): Promise<GitHubReview[]> {
     const reviews: GitHubReview[] = [];
+
+    console.log(`レビュー取得開始: ${pullRequests.length}個のPRからレビューを取得 (ページネーション対応)`);
+
+    let totalPRs = 0;
+    let totalReviews = 0;
 
     const batchSize = 10;
     for (let i = 0; i < pullRequests.length; i += batchSize) {
@@ -598,20 +741,36 @@ export class GitHubService {
           let page = 1;
           let hasMore = true;
           const prReviews: GitHubReview[] = [];
-          while (hasMore) {
+          let prReviewCount = 0;
+          const maxPages = 20; // 最大20ページ（2000個のレビュー）
+
+          console.log(`  PR #${pr.number} (${repoName}): レビュー取得開始`);
+
+          while (hasMore && page <= maxPages) {
             const data = await this.makeRequest<GitHubReview[]>(`${this.baseURL}/repos/${orgName}/${repoName}/pulls/${pr.number}/reviews`, {
               per_page: 100,
               page
             });
+            
             prReviews.push(...data);
+            prReviewCount += data.length;
+            
+            console.log(`    PR #${pr.number}: レビューページ ${page}: ${data.length}個取得 (累計: ${prReviewCount}個)`);
+            
             hasMore = data.length === 100;
             page++;
+
+            // レート制限を避けるため少し待機
+            await new Promise(resolve => setTimeout(resolve, 100));
           }
 
-          return prReviews.filter((review: GitHubReview) => {
+          const filteredReviews = prReviews.filter((review: GitHubReview) => {
             const submittedAt = moment(review.submitted_at);
             return submittedAt.isBetween(dateRange.startDate, dateRange.endDate, 'day', '[]');
           });
+
+          console.log(`  PR #${pr.number}: ${prReviewCount}個取得、${filteredReviews.length}個が期間内 (${page - 1}ページ)`);
+          return filteredReviews;
         } catch (error) {
           console.error(`Error fetching reviews for ${repoName} PR #${pr.number}:`, error);
           return [];
@@ -620,8 +779,13 @@ export class GitHubService {
 
       const results = await Promise.all(promises);
       results.forEach(result => reviews.push(...result));
+      
+      totalPRs += batch.length;
+      totalReviews += reviews.length;
+      console.log(`バッチ処理完了: ${totalPRs}/${pullRequests.length} PR (累計レビュー: ${totalReviews}個)`);
     }
 
+    console.log(`レビュー取得完了: 総レビュー数: ${reviews.length}個`);
     return reviews;
   }
 
