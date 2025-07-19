@@ -5,7 +5,6 @@ import { MemberSelector } from './components/MemberSelector';
 import { RateLimitDisplay } from './components/RateLimitDisplay';
 import { api } from './services/api';
 import { Organization, MemberActivity } from './types';
-import './App.css';
 
 interface WeeklyData {
   weekKey: string;
@@ -168,7 +167,7 @@ function App() {
 
   // 週単位データを削除
   const handleDeleteWeeklyData = async (orgName: string, weekStart: string) => {
-    if (!confirm(`週 ${weekStart} のデータを削除しますか？`)) {
+    if (!window.confirm(`週 ${weekStart} のデータを削除しますか？`)) {
       return;
     }
     
