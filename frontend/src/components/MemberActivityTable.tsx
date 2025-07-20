@@ -25,14 +25,19 @@ export const MemberActivityTable: React.FC<MemberActivityTableProps> = ({
   console.log('MemberActivityTable received activities:', activities);
   console.log('Date range:', startDate, 'to', endDate);
   
-  // メンバーごとの合計を計算
-  const memberSummaries: MemberSummary[] = activities.map(activity => {
+  // メンバーごとに全組織のデータを統合
+  const memberMap = new Map<string, MemberSummary>();
+  
+  activities.forEach(activity => {
+    const login = activity.login;
+    const existingMember = memberMap.get(login);
+    
     const totalIssues = Object.values(activity.activities).reduce((sum, data) => sum + data.issues, 0);
     const totalPullRequests = Object.values(activity.activities).reduce((sum, data) => sum + data.pullRequests, 0);
     const totalCommits = Object.values(activity.activities).reduce((sum, data) => sum + data.commits, 0);
     const totalReviews = Object.values(activity.activities).reduce((sum, data) => sum + data.reviews, 0);
 
-    console.log(`Member ${activity.login} totals:`, {
+    console.log(`Processing ${activity.login} from ${activity.organization}:`, {
       issues: totalIssues,
       pullRequests: totalPullRequests,
       commits: totalCommits,
@@ -40,23 +45,48 @@ export const MemberActivityTable: React.FC<MemberActivityTableProps> = ({
       activities: activity.activities
     });
 
-    return {
-      login: activity.login,
-      name: activity.name || activity.login,
-      avatar_url: activity.avatar_url,
-      totalIssues,
-      totalPullRequests,
-      totalCommits,
-      totalReviews
-    };
+    if (existingMember) {
+      // 既存のメンバーのデータに追加
+      existingMember.totalIssues += totalIssues;
+      existingMember.totalPullRequests += totalPullRequests;
+      existingMember.totalCommits += totalCommits;
+      existingMember.totalReviews += totalReviews;
+      console.log(`Updated existing member ${login}:`, {
+        issues: existingMember.totalIssues,
+        pullRequests: existingMember.totalPullRequests,
+        commits: existingMember.totalCommits,
+        reviews: existingMember.totalReviews
+      });
+    } else {
+      // 新しいメンバーを追加
+      memberMap.set(login, {
+        login: activity.login,
+        name: activity.name || activity.login,
+        avatar_url: activity.avatar_url,
+        totalIssues,
+        totalPullRequests,
+        totalCommits,
+        totalReviews
+      });
+      console.log(`Added new member ${login}:`, {
+        issues: totalIssues,
+        pullRequests: totalPullRequests,
+        commits: totalCommits,
+        reviews: totalReviews
+      });
+    }
   });
 
-  // 合計値でソート（降順）
-  const sortedMembers = memberSummaries.sort((a, b) => {
+  // Mapから配列に変換してソート
+  const memberSummaries: MemberSummary[] = Array.from(memberMap.values()).sort((a, b) => {
     const totalA = a.totalIssues + a.totalPullRequests + a.totalCommits + a.totalReviews;
     const totalB = b.totalIssues + b.totalPullRequests + b.totalCommits + b.totalReviews;
     return totalB - totalA;
   });
+
+  console.log('Final member summaries:', memberSummaries);
+
+  const sortedMembers = memberSummaries;
 
   // 最大値を計算（グラフのスケール用）
   const maxIssues = Math.max(...sortedMembers.map(m => m.totalIssues), 1);
