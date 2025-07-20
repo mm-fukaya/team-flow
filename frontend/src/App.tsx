@@ -7,6 +7,12 @@ import { MemberActivityTable } from './components/MemberActivityTable';
 import { api } from './services/api';
 import { Organization, MemberActivity } from './types';
 
+interface RateLimitInfo {
+  limit: number;
+  remaining: number;
+  reset: number;
+}
+
 interface WeeklyData {
   weekKey: string;
   weekStart: string;
@@ -42,6 +48,10 @@ function App() {
   const [displayStartMonth, setDisplayStartMonth] = useState<string>('');
   const [displayEndMonth, setDisplayEndMonth] = useState<string>('');
   const [showPeriodSummary, setShowPeriodSummary] = useState(false);
+  
+  // レートリミット関連のstate
+  const [showRateLimitDialog, setShowRateLimitDialog] = useState(false);
+  const [rateLimitInfo, setRateLimitInfo] = useState<RateLimitInfo | null>(null);
 
   useEffect(() => {
     loadOrganizations();
@@ -63,6 +73,17 @@ function App() {
   useEffect(() => {
     loadDisplayPeriodData();
   }, [displayStartMonth, displayEndMonth]);
+
+  // レートリミット情報を取得
+  const fetchRateLimitInfo = async (): Promise<RateLimitInfo | null> => {
+    try {
+      const data = await api.getRateLimit();
+      return data.rateLimitInfo;
+    } catch (error) {
+      console.error('Error fetching rate limit:', error);
+      return null;
+    }
+  };
 
   const loadOrganizations = async () => {
     try {
@@ -201,6 +222,14 @@ function App() {
 
   // 月毎データを取得
   const handleFetchMonthlyData = async (orgName: string, monthStart: string, monthEnd: string, forceUpdate: boolean = false) => {
+    // レートリミットチェック
+    const rateLimit = await fetchRateLimitInfo();
+    if (rateLimit && rateLimit.remaining <= 2000) {
+      setRateLimitInfo(rateLimit);
+      setShowRateLimitDialog(true);
+      return;
+    }
+
     // 既存データのチェック
     if (!forceUpdate) {
       const existingData = monthlyData[orgName] || [];
@@ -231,6 +260,15 @@ function App() {
   // 月毎確認ダイアログで強制更新を実行
   const handleMonthlyForceUpdate = async () => {
     if (!monthlyConfirmDialogData) return;
+    
+    // レートリミットチェック
+    const rateLimit = await fetchRateLimitInfo();
+    if (rateLimit && rateLimit.remaining <= 2000) {
+      setRateLimitInfo(rateLimit);
+      setShowRateLimitDialog(true);
+      setShowMonthlyConfirmDialog(false);
+      return;
+    }
     
     setShowMonthlyConfirmDialog(false);
     setIsFetchingMonthly(true);
@@ -534,6 +572,61 @@ function App() {
                   className="flex-1 bg-blue-500 text-white py-2 px-4 rounded hover:bg-blue-600"
                 >
                   再取得
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* レートリミット警告ダイアログ */}
+        {showRateLimitDialog && rateLimitInfo && (
+          <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+            <div className="bg-white p-6 rounded-lg max-w-md w-full mx-4">
+              <div className="flex items-center mb-4">
+                <svg className="w-6 h-6 text-red-500 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.964-.833-2.732 0L3.732 16.5c-.77.833.192 2.5 1.732 2.5z" />
+                </svg>
+                <h3 className="text-lg font-semibold text-red-600">GitHub API レートリミット警告</h3>
+              </div>
+              <div className="mb-4">
+                <p className="text-gray-700 mb-3">
+                  データの取得に失敗する可能性があるため、処理を中断しました。
+                </p>
+                <div className="bg-gray-50 p-3 rounded-lg">
+                  <div className="space-y-2 text-sm">
+                    <div>
+                      <span className="text-gray-600">現在の使用状況:</span>
+                      <span className="ml-2 font-medium text-red-600">
+                        {rateLimitInfo.remaining.toLocaleString()} / {rateLimitInfo.limit.toLocaleString()}
+                      </span>
+                    </div>
+                    <div>
+                      <span className="text-gray-600">リセット時刻:</span>
+                      <span className="ml-2 font-medium">
+                        {moment.unix(rateLimitInfo.reset).format('YYYY年M月D日 H:mm:ss')}
+                      </span>
+                    </div>
+                    <div>
+                      <span className="text-gray-600">リセットまで:</span>
+                      <span className="ml-2 font-medium">
+                        {moment.unix(rateLimitInfo.reset).fromNow()}
+                      </span>
+                    </div>
+                  </div>
+                </div>
+                <p className="text-sm text-gray-600 mt-3">
+                  レートリミットが回復するまでお待ちください。
+                </p>
+              </div>
+              <div className="flex justify-end">
+                <button
+                  onClick={() => {
+                    setShowRateLimitDialog(false);
+                    setRateLimitInfo(null);
+                  }}
+                  className="bg-blue-500 text-white py-2 px-4 rounded hover:bg-blue-600 transition-colors"
+                >
+                  了解
                 </button>
               </div>
             </div>
