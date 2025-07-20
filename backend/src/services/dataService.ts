@@ -16,6 +16,20 @@ export interface WeeklyDataFile {
   lastUpdated: string;
 }
 
+export interface MonthData {
+  monthKey: string; // YYYY-MM形式
+  monthStart: string; // YYYY-MM-DD形式
+  monthEnd: string;   // YYYY-MM-DD形式
+  lastUpdated: string;
+  activities: MemberActivity[];
+}
+
+export interface MonthlyDataFile {
+  organization: string;
+  months: { [monthKey: string]: MonthData };
+  lastUpdated: string;
+}
+
 export class DataService {
   private dataDir = path.join(__dirname, '../../data');
   private dataFile = path.join(this.dataDir, 'member-activities.json');
@@ -205,6 +219,266 @@ export class DataService {
       return { activities: allActivities, organizations: orgStats };
     } catch (error) {
       console.error('Error loading all organizations weekly activities:', error);
+      return { activities: [], organizations: {} };
+    }
+  }
+
+  // 月のキーを生成（YYYY-MM形式）
+  private getMonthKey(date: string): string {
+    return moment(date).format('YYYY-MM');
+  }
+
+  // 月の開始日と終了日を取得
+  private getMonthRange(date: string): { start: string, end: string } {
+    const start = moment(date).startOf('month').format('YYYY-MM-DD');
+    const end = moment(date).endOf('month').format('YYYY-MM-DD');
+    return { start, end };
+  }
+
+  // 月毎データファイルのパスを取得
+  private getMonthlyDataFile(orgName: string, monthKey?: string): string {
+    if (monthKey) {
+      return path.join(this.dataDir, `${orgName}-monthly-${monthKey}.json`);
+    }
+    return path.join(this.dataDir, `${orgName}-monthly-activities.json`);
+  }
+
+  // 月毎データを保存
+  saveMonthlyActivities(orgName: string, monthStart: string, monthEnd: string, activities: MemberActivity[]): void {
+    try {
+      const monthKey = this.getMonthKey(monthStart);
+      const filePath = this.getMonthlyDataFile(orgName, monthKey);
+      
+      const monthlyData = {
+        organization: orgName,
+        monthKey,
+        monthStart,
+        monthEnd,
+        lastUpdated: new Date().toISOString(),
+        activities
+      };
+
+      fs.writeFileSync(filePath, JSON.stringify(monthlyData, null, 2));
+      console.log(`Saved ${activities.length} activities for ${orgName} month ${monthKey} (${monthStart} - ${monthEnd}) to ${path.basename(filePath)}`);
+    } catch (error) {
+      console.error(`Error saving monthly activities for ${orgName}:`, error);
+      throw error;
+    }
+  }
+
+  // 月毎データを読み込み
+  loadMonthlyActivities(orgName: string, monthStart: string): MemberActivity[] | null {
+    try {
+      const monthKey = this.getMonthKey(monthStart);
+      console.log(`loadMonthlyActivities called for ${orgName}, monthStart: ${monthStart}, monthKey: ${monthKey}`);
+      
+      // 新しい形式のファイルを試す
+      const newFilePath = this.getMonthlyDataFile(orgName, monthKey);
+      console.log(`Checking new format file: ${newFilePath}, exists: ${fs.existsSync(newFilePath)}`);
+      if (fs.existsSync(newFilePath)) {
+        const monthlyData = JSON.parse(fs.readFileSync(newFilePath, 'utf8'));
+        console.log(`New format file loaded, has activities: ${!!monthlyData.activities}, has months: ${!!monthlyData.months}`);
+        
+        // 新しい形式の場合
+        if (monthlyData.activities) {
+          console.log(`New format activities count: ${monthlyData.activities.length}`);
+          return monthlyData.activities;
+        }
+        
+        // 古い形式の場合（ファイル名は新しいが内容は古い）
+        if (monthlyData.months && monthlyData.months[monthKey]) {
+          const activities = monthlyData.months[monthKey].activities || [];
+          console.log(`Old format in new file activities count: ${activities.length}`);
+          return activities;
+        }
+      }
+      
+      // 古い形式のファイルを試す
+      const oldFilePath = this.getMonthlyDataFile(orgName);
+      console.log(`Checking old format file: ${oldFilePath}, exists: ${fs.existsSync(oldFilePath)}`);
+      if (fs.existsSync(oldFilePath)) {
+        const monthlyData = JSON.parse(fs.readFileSync(oldFilePath, 'utf8'));
+        console.log(`Old format file loaded, has months: ${!!monthlyData.months}, monthKey exists: ${monthlyData.months ? !!monthlyData.months[monthKey] : false}`);
+        if (monthlyData.months && monthlyData.months[monthKey]) {
+          const activities = monthlyData.months[monthKey].activities || [];
+          console.log(`Old format activities loaded, count: ${activities.length}`);
+          return activities;
+        }
+      }
+      
+      console.log(`No data found for ${orgName} ${monthKey}`);
+      return null;
+    } catch (error) {
+      console.error(`Error loading monthly activities for ${orgName}:`, error);
+      return null;
+    }
+  }
+
+  // 取得済みの月一覧を取得
+  getFetchedMonths(orgName: string): { monthKey: string, monthStart: string, monthEnd: string, lastUpdated: string }[] {
+    try {
+      console.log(`getFetchedMonths called for ${orgName}`);
+      
+      if (!fs.existsSync(this.dataDir)) {
+        console.log(`Data directory does not exist: ${this.dataDir}`);
+        return [];
+      }
+
+      const files = fs.readdirSync(this.dataDir);
+      console.log(`All files in data directory:`, files);
+      
+      const monthFiles = files.filter(file => 
+        file.startsWith(`${orgName}-monthly-`) && 
+        file.endsWith('.json') &&
+        file !== `${orgName}-monthly-activities.json`
+      );
+      
+      console.log(`Month files for ${orgName}:`, monthFiles);
+
+      const months: { monthKey: string, monthStart: string, monthEnd: string, lastUpdated: string }[] = [];
+
+      for (const file of monthFiles) {
+        try {
+          const filePath = path.join(this.dataDir, file);
+          const monthlyData = JSON.parse(fs.readFileSync(filePath, 'utf8'));
+          
+          console.log(`Reading file ${file}:`, {
+            hasMonthKey: !!monthlyData.monthKey,
+            hasMonths: !!monthlyData.months,
+            monthsKeys: monthlyData.months ? Object.keys(monthlyData.months) : []
+          });
+          
+          // 新しい形式のファイル
+          if (monthlyData.monthKey) {
+            months.push({
+              monthKey: monthlyData.monthKey,
+              monthStart: monthlyData.monthStart,
+              monthEnd: monthlyData.monthEnd,
+              lastUpdated: monthlyData.lastUpdated
+            });
+          }
+          // 古い形式のファイル（monthsオブジェクト内にデータがある）
+          else if (monthlyData.months) {
+            Object.entries(monthlyData.months).forEach(([monthKey, monthData]: [string, any]) => {
+              months.push({
+                monthKey,
+                monthStart: monthData.monthStart,
+                monthEnd: monthData.monthEnd,
+                lastUpdated: monthData.lastUpdated
+              });
+            });
+          }
+        } catch (error) {
+          console.error(`Error reading monthly file ${file}:`, error);
+        }
+      }
+
+      console.log(`Final months for ${orgName}:`, months);
+      
+      // 月の開始日でソート
+      return months.sort((a, b) => a.monthStart.localeCompare(b.monthStart));
+    } catch (error) {
+      console.error(`Error getting fetched months for ${orgName}:`, error);
+      return [];
+    }
+  }
+
+  // 特定の月が取得済みかチェック
+  isMonthFetched(orgName: string, monthStart: string): boolean {
+    try {
+      const monthKey = this.getMonthKey(monthStart);
+      const filePath = this.getMonthlyDataFile(orgName, monthKey);
+      
+      return fs.existsSync(filePath);
+    } catch (error) {
+      console.error(`Error checking if month is fetched for ${orgName}:`, error);
+      return false;
+    }
+  }
+
+  // 月毎データを削除
+  deleteMonthlyActivities(orgName: string, monthStart: string): boolean {
+    try {
+      const monthKey = this.getMonthKey(monthStart);
+      const filePath = this.getMonthlyDataFile(orgName, monthKey);
+      
+      if (fs.existsSync(filePath)) {
+        fs.unlinkSync(filePath);
+        console.log(`Deleted monthly activities for ${orgName} month ${monthKey} (${path.basename(filePath)})`);
+        return true;
+      }
+
+      return false;
+    } catch (error) {
+      console.error(`Error deleting monthly activities for ${orgName}:`, error);
+      return false;
+    }
+  }
+
+  // 全組織の月毎データを統合して取得
+  loadAllOrganizationsMonthlyActivities(startMonth: string, endMonth: string): { activities: MemberActivity[], organizations: { [key: string]: { count: number, lastUpdated: string | null, fetchedMonths: string[] } } } {
+    try {
+      console.log('loadAllOrganizationsMonthlyActivities called with:', { startMonth, endMonth });
+      
+      const organizations = require('../../../config/organizations.json').organizations;
+      const allActivities: MemberActivity[] = [];
+      const orgStats: { [key: string]: { count: number, lastUpdated: string | null, fetchedMonths: string[] } } = {};
+
+      for (const org of organizations) {
+        console.log(`Processing organization: ${org.name}`);
+        const fetchedMonths = this.getFetchedMonths(org.name);
+        console.log(`Fetched months for ${org.name}:`, fetchedMonths);
+        
+        let totalCount = 0;
+        let latestUpdate: string | null = null;
+        const relevantMonths: string[] = [];
+
+        // 指定期間内の月のデータを統合
+        for (const month of fetchedMonths) {
+          const monthDate = moment(month.monthStart);
+          const startDate = moment(startMonth);
+          const endDate = moment(endMonth);
+          
+          console.log(`Checking month ${month.monthKey}:`, {
+            monthDate: monthDate.format('YYYY-MM'),
+            startDate: startDate.format('YYYY-MM'),
+            endDate: endDate.format('YYYY-MM'),
+            isBetween: monthDate.isBetween(startDate, endDate, 'month', '[]')
+          });
+          
+          if (monthDate.isBetween(startDate, endDate, 'month', '[]')) {
+            const monthActivities = this.loadMonthlyActivities(org.name, month.monthStart);
+            console.log(`Loaded activities for ${org.name} ${month.monthKey}:`, monthActivities ? monthActivities.length : 0);
+            
+            if (monthActivities) {
+              allActivities.push(...monthActivities);
+              totalCount += monthActivities.length;
+              relevantMonths.push(month.monthKey);
+              
+              if (!latestUpdate || month.lastUpdated > latestUpdate) {
+                latestUpdate = month.lastUpdated;
+              }
+            }
+          }
+        }
+
+        orgStats[org.name] = {
+          count: totalCount,
+          lastUpdated: latestUpdate,
+          fetchedMonths: relevantMonths
+        };
+        
+        console.log(`Final stats for ${org.name}:`, orgStats[org.name]);
+      }
+
+      console.log('Final result:', { 
+        totalActivities: allActivities.length, 
+        organizations: Object.keys(orgStats) 
+      });
+      
+      return { activities: allActivities, organizations: orgStats };
+    } catch (error) {
+      console.error('Error loading all organizations monthly activities:', error);
       return { activities: [], organizations: {} };
     }
   }

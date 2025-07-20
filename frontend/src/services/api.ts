@@ -37,50 +37,45 @@ export const api = {
   },
 
   // データを取得して保存（組織ごと）
-  fetchData: async (orgName: string, startDate: string, endDate: string, testMode: boolean = false, targetMember?: string): Promise<any> => {
-    console.log(`APIリクエスト: 組織=${orgName}, 開始日=${startDate}, 終了日=${endDate}, テストモード=${testMode}${targetMember ? `, 対象メンバー=${targetMember}` : ''}`);
+  fetchData: async (orgName: string, startDate: string, endDate: string): Promise<any> => {
+    console.log(`APIリクエスト: 組織=${orgName}, 開始日=${startDate}, 終了日=${endDate}`);
     const response = await axios.post(`${API_BASE_URL}/fetch-data`, {
       orgName,
       startDate,
-      endDate,
-      testMode,
-      targetMember
+      endDate
     });
     return response.data;
   },
 
   // 特定メンバーのデータを取得（テスト用）
-  fetchMemberData: async (orgName: string, startDate: string, endDate: string, testMode: boolean = false, memberLogin: string = 'mm-kado'): Promise<any> => {
-    console.log(`APIリクエスト: メンバー=${memberLogin}, 組織=${orgName}, 開始日=${startDate}, 終了日=${endDate}, テストモード=${testMode}`);
+  fetchMemberData: async (orgName: string, startDate: string, endDate: string, memberLogin: string = 'mm-kado'): Promise<any> => {
+    console.log(`APIリクエスト: メンバー=${memberLogin}, 組織=${orgName}, 開始日=${startDate}, 終了日=${endDate}`);
     const response = await axios.post(`${API_BASE_URL}/fetch-member-data`, {
       orgName,
       startDate,
       endDate,
-      testMode,
       memberLogin
     });
     return response.data;
   },
 
   // mm-kadoのデータを全ての組織から取得
-  fetchMmKadoAllOrgs: async (startDate: string, endDate: string, testMode: boolean = false, memberLogin: string = 'mm-kado'): Promise<any> => {
-    console.log(`APIリクエスト: メンバー=${memberLogin}, 全組織, 開始日=${startDate}, 終了日=${endDate}, テストモード=${testMode}`);
+  fetchMmKadoAllOrgs: async (startDate: string, endDate: string, memberLogin: string = 'mm-kado'): Promise<any> => {
+    console.log(`APIリクエスト: メンバー=${memberLogin}, 全組織, 開始日=${startDate}, 終了日=${endDate}`);
     const response = await axios.post(`${API_BASE_URL}/fetch-mm-kado-all-orgs`, {
       startDate,
       endDate,
-      testMode,
       memberLogin
     });
     return response.data;
   },
 
   // 全組織のデータを一括取得
-  fetchAllOrganizations: async (startDate: string, endDate: string, testMode: boolean = false): Promise<any> => {
-    console.log(`APIリクエスト: 全組織, 開始日=${startDate}, 終了日=${endDate}, テストモード=${testMode}`);
+  fetchAllOrganizations: async (startDate: string, endDate: string): Promise<any> => {
+    console.log(`APIリクエスト: 全組織, 開始日=${startDate}, 終了日=${endDate}`);
     const response = await axios.post(`${API_BASE_URL}/fetch-all-organizations`, {
       startDate,
-      endDate,
-      testMode
+      endDate
     });
     return response.data;
   },
@@ -101,6 +96,39 @@ export const api = {
     return response.data;
   },
 
+  // 月毎データを取得
+  async getMonthlyData(orgName: string) {
+    const response = await axios.get(`${API_BASE_URL}/monthly-data/${orgName}`);
+    return response.data;
+  },
+
+  // 月毎データを取得して保存
+  async fetchMonthlyData(orgName: string, monthStart: string, monthEnd: string, forceUpdate: boolean = false) {
+    const response = await axios.post(`${API_BASE_URL}/fetch-monthly-data`, {
+      orgName,
+      monthStart,
+      monthEnd,
+      forceUpdate
+    });
+    
+    return response.data;
+  },
+
+  // 月毎データを削除
+  async deleteMonthlyData(orgName: string, monthStart: string) {
+    const response = await axios.delete(`${API_BASE_URL}/monthly-data/${orgName}/${monthStart}`);
+    
+    return response.data;
+  },
+
+  // 指定期間の月毎データを統合して取得
+  async getMonthlyActivities(startMonth: string, endMonth: string) {
+    const response = await axios.get(`${API_BASE_URL}/monthly-activities`, {
+      params: { startMonth, endMonth }
+    });
+    return response.data;
+  },
+
   // 週単位データを取得
   async getWeeklyData(orgName: string) {
     const response = await axios.get(`${API_BASE_URL}/weekly-data/${orgName}`);
@@ -108,12 +136,11 @@ export const api = {
   },
 
   // 週単位データを取得して保存
-  async fetchWeeklyData(orgName: string, weekStart: string, weekEnd: string, testMode: boolean = false, forceUpdate: boolean = false) {
+  async fetchWeeklyData(orgName: string, weekStart: string, weekEnd: string, forceUpdate: boolean = false) {
     const response = await axios.post(`${API_BASE_URL}/fetch-weekly-data`, {
       orgName,
       weekStart,
       weekEnd,
-      testMode,
       forceUpdate
     });
     

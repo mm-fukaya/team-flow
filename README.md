@@ -1,57 +1,112 @@
-# Git Status - GitHub活動データ管理システム
+# GitStatus - GitHub Organization Activity Tracker
 
-GitHub組織のメンバー活動データを取得・管理・可視化するシステムです。
+GitHub組織のメンバー活動を追跡・分析するWebアプリケーションです。
 
-## 機能
+## 主な機能
 
-### 基本機能
-- 組織メンバーの活動データ取得（イシュー、プルリクエスト、コミット、レビュー）
-- 期間指定でのデータ取得
-- テストモードでの動作確認
-- 組織別統計表示
+### 1. 月毎データ取得機能（新機能）
+- **月単位でのデータ取得**: 指定した月のデータを一括取得
+- **月毎ファイル保存**: 各月のデータを個別のJSONファイルに保存
+- **取得済み月の表示**: UIで取得済みの月と最終取得日時を表示
+- **期間指定表示**: 開始月と終了月を指定してデータを表示
+- **再取得確認**: 既に取得済みの月を再取得する際の確認ダイアログ
 
-### 週単位データ管理機能
-- 週単位でのデータ取得・保存・管理
-- 取得済み週の一覧表示
-- 週単位データの再取得・削除機能
-- 既に取得済みの週を再取得する際の確認ダイアログ
-- 週単位データの統合表示
+### 2. 週単位データ取得機能（従来機能）
+- **週単位でのデータ取得**: 指定した週のデータを取得
+- **週毎ファイル保存**: 各週のデータを個別のJSONファイルに保存
+- **取得済み週の表示**: UIで取得済みの週と最終取得日時を表示
 
-### 全メンバー活動サマリー
-- 全メンバーの活動を一目で比較できる棒グラフテーブル
-- 月単位での期間選択機能
-- イシュー作成数、プルリク作成数、コミット数、レビュー数を色分け表示
-- 合計値でのソート（降順）
-- メンバーアバターと名前の表示
-- 組織をまたいだメンバー統合表示
+### 3. メンバー活動サマリー
+- **全メンバーの活動一覧**: イシュー、PR、コミット、レビューの集計
+- **月別フィルタリング**: 特定の月のデータのみを表示
+- **組織横断統合**: 複数組織のメンバーデータを統合表示
+- **活動グラフ**: 各メンバーの活動をカラーコード付きバーグラフで表示
 
-### データ可視化
-- 個別メンバーの活動チャート
-- 組織別詳細情報
-- リアルタイム統計表示
+### 4. データ管理
+- **テストモード**: 最新3リポジトリのみ、各リポジトリから10件ずつ取得
+- **レート制限対応**: GitHub APIのレート制限を考慮した取得
+- **データ削除**: 不要なデータの削除機能
 
-## 技術スタック
+## 使用方法
 
-### バックエンド
-- Node.js + TypeScript
-- Express.js
-- GitHub API (GraphQL + REST)
-- moment.js
+### 月毎データ取得
+1. **月を選択**: 「取得する月」フィールドで月を選択
+2. **データ取得**: 「月毎データ取得（全組織）」ボタンをクリック
+3. **確認ダイアログ**: 既に取得済みの場合は確認ダイアログが表示
+4. **表示期間設定**: 開始月と終了月を指定して「期間データ読み込み」をクリック
 
-### フロントエンド
-- React + TypeScript
-- Tailwind CSS
-- moment.js
+### 週単位データ取得（従来機能）
+1. **期間設定**: 開始日と終了日を指定
+2. **データ取得**: 「週単位データ取得（全組織）」ボタンをクリック
+
+### メンバー活動サマリー表示
+1. **期間設定**: 表示したい月の範囲を指定
+2. **サマリー表示**: 「メンバー活動サマリーを表示」ボタンをクリック
+3. **データ確認**: 各メンバーの活動をグラフで確認
+
+## API エンドポイント
+
+### 月毎データ関連
+- `GET /api/monthly-data/:orgName` - 組織の月毎データ一覧取得
+- `POST /api/fetch-monthly-data` - 月毎データ取得・保存
+- `DELETE /api/monthly-data/:orgName/:monthStart` - 月毎データ削除
+- `GET /api/monthly-activities` - 指定期間の月毎データ統合取得
+
+### 週単位データ関連
+- `GET /api/weekly-data/:orgName` - 組織の週単位データ一覧取得
+- `POST /api/fetch-weekly-data` - 週単位データ取得・保存
+- `DELETE /api/weekly-data/:orgName/:weekStart` - 週単位データ削除
+- `GET /api/weekly-activities` - 指定期間の週単位データ統合取得
+
+### 従来のエンドポイント
+- `GET /api/activities` - 全組織の活動データ取得
+- `GET /api/organizations` - 組織一覧取得
+- `POST /api/fetch` - 全組織のデータ取得
+
+## データファイル構造
+
+### 月毎データファイル (`{orgName}-monthly-activities.json`)
+```json
+{
+  "organization": "macromill",
+  "months": {
+    "2025-06": {
+      "monthKey": "2025-06",
+      "monthStart": "2025-06-01",
+      "monthEnd": "2025-06-30",
+      "lastUpdated": "2025-07-19T23:04:30.719Z",
+      "activities": [...]
+    }
+  },
+  "lastUpdated": "2025-07-19T23:04:30.719Z"
+}
+```
+
+### 週単位データファイル (`{orgName}-weekly-activities.json`)
+```json
+{
+  "organization": "macromill",
+  "weeks": {
+    "2025-W25": {
+      "weekKey": "2025-W25",
+      "weekStart": "2025-06-16",
+      "weekEnd": "2025-06-22",
+      "lastUpdated": "2025-07-19T23:04:30.719Z",
+      "activities": [...]
+    }
+  },
+  "lastUpdated": "2025-07-19T23:04:30.719Z"
+}
+```
 
 ## セットアップ
 
 ### 前提条件
 - Node.js (v16以上)
-- npm
+- npm または yarn
 - GitHub Personal Access Token
 
 ### インストール
-
 1. リポジトリをクローン
 ```bash
 git clone <repository-url>
@@ -60,91 +115,78 @@ cd GitStatus
 
 2. 依存関係をインストール
 ```bash
+# バックエンド
+cd backend
 npm install
-cd backend && npm install
-cd ../frontend && npm install
+
+# フロントエンド
+cd ../frontend
+npm install
 ```
 
 3. 環境変数を設定
 ```bash
-cp backend/env.example backend/.env
-# .envファイルを編集してGitHubトークンを設定
+# backend/.env
+GITHUB_TOKEN=your_github_token_here
 ```
 
 4. アプリケーションを起動
 ```bash
-# バックエンド
-cd backend && npm start
+# バックエンド（ポート3001）
+cd backend
+npm start
 
-# フロントエンド（別ターミナル）
-cd frontend && npm start
+# フロントエンド（ポート3000）
+cd frontend
+npm start
 ```
 
-## 使用方法
+## 設定ファイル
 
-### データ取得
-1. 開始日・終了日を設定
-2. テストモードの確認
-3. 「データ取得（全組織）」ボタンでデータを取得
-
-### 週単位データ管理
-1. 週の開始日を選択（自動で週の範囲が計算される）
-2. 「週単位データ取得」ボタンで全組織の該当週データを取得
-3. 取得済み週一覧で再取得・削除が可能
-
-### 全メンバー活動サマリー
-1. 「表示月を選択」で月を選択
-2. 「メンバーテーブルを表示」ボタンでサマリーテーブルを表示
-3. 全メンバーの活動を一目で比較
-
-### 個別メンバー詳細
-1. 「全組織メンバー選択」でメンバーを選択
-2. 選択したメンバーの活動チャートを表示
-
-## データ構造
-
-### 週単位データ
-- ファイル形式: `{orgName}-weekly-activities.json`
-- 構造: 週キー（YYYY-WW）ごとの活動データ
-
-### メンバー活動データ
-- ファイル形式: `{orgName}-activities.json`
-- 構造: メンバーごとの月別活動データ
-
-## API エンドポイント
-
-### 週単位データ
-- `GET /api/weekly-data/:orgName` - 組織の週単位データ取得
-- `POST /api/fetch-weekly-data` - 週単位データ取得・保存
-- `DELETE /api/weekly-data/:orgName/:weekStart` - 週単位データ削除
-- `GET /api/weekly-activities` - 全組織の週単位データ統合取得
-
-### 基本データ
-- `GET /api/activities` - 全組織の活動データ取得
-- `POST /api/fetch-all-organizations` - 全組織のデータ一括取得
-
-## 設定
-
-### 組織設定
-`config/organizations.json`で対象組織を設定
-
+### `config/organizations.json`
 ```json
 {
   "organizations": [
     {
-      "name": "organization-name",
-      "displayName": "Organization Display Name"
+      "name": "macromill",
+      "displayName": "macromill"
+    },
+    {
+      "name": "macromill-mint",
+      "displayName": "macromill-mint"
     }
   ]
 }
 ```
 
+## 技術スタック
+
+### バックエンド
+- **Node.js** + **TypeScript**
+- **Express.js** - Webフレームワーク
+- **Octokit** - GitHub API クライアント
+- **Moment.js** - 日付処理
+
+### フロントエンド
+- **React** + **TypeScript**
+- **Tailwind CSS** - スタイリング
+- **Axios** - HTTP クライアント
+- **Moment.js** - 日付処理
+
 ## 注意事項
 
-- GitHub APIのレート制限に注意
-- 大量データ取得時は時間がかかる場合があります
-- テストモードでは制限されたデータのみ取得されます
+1. **GitHub API レート制限**: 認証済みリクエストで5,000リクエスト/時間
+2. **テストモード**: 開発・テスト時はテストモードを使用してAPI使用量を削減
+3. **データ保存**: 取得したデータは `backend/data/` ディレクトリに保存
+4. **エラーハンドリング**: API エラーやネットワークエラーに対する適切な処理を実装
 
-## ライセンス
+## トラブルシューティング
 
-MIT License 
+### よくある問題
+1. **レート制限エラー**: テストモードを使用するか、しばらく待ってから再試行
+2. **データが取得できない**: GitHub Tokenの権限を確認
+3. **フロントエンドエラー**: バックエンドサーバーが起動しているか確認
+
+### ログ確認
+- バックエンドのコンソールログで詳細なエラー情報を確認
+- ブラウザの開発者ツールでネットワークエラーを確認 

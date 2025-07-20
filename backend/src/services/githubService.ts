@@ -147,15 +147,11 @@ export class GitHubService {
     }
   }
 
-  async getIssues(orgName: string, dateRange: DateRange, testMode: boolean = false, targetMember?: string): Promise<GitHubIssue[]> {
+  async getIssues(orgName: string, dateRange: DateRange, targetMember?: string): Promise<GitHubIssue[]> {
     const issues: GitHubIssue[] = [];
     const repos = await this.getRepositories(orgName);
 
-    // テストモードの場合は最新の3個のリポジトリのみ使用
-    const targetRepos = testMode ? repos.slice(0, 3) : repos;
-    const perPage = testMode ? 10 : 100; // テスト時は各リポジトリから10個のイシューのみ
-
-    console.log(`イシュー取得: ${targetRepos.length}個のリポジトリから、各${perPage}個ずつ`);
+    console.log(`イシュー取得: ${repos.length}個のリポジトリから、各5000個ずつ（最大50ページ）`);
     if (targetMember) {
       console.log(`特定メンバー指定: ${targetMember}`);
     }
@@ -164,8 +160,8 @@ export class GitHubService {
 
     // 並列処理でリクエスト数を削減（最大10つずつ）
     const batchSize = 10;
-    for (let i = 0; i < targetRepos.length; i += batchSize) {
-      const batch = targetRepos.slice(i, i + batchSize);
+    for (let i = 0; i < repos.length; i += batchSize) {
+      const batch = repos.slice(i, i + batchSize);
       const promises = batch.map(async (repo) => {
         try {
           let allRepoIssues: GitHubIssue[] = [];
@@ -176,7 +172,7 @@ export class GitHubService {
           const params: any = {
             state: 'all',
             since: dateRange.startDate,
-            per_page: perPage,
+            per_page: 100,
             page: page
           };
           
@@ -185,13 +181,13 @@ export class GitHubService {
           }
 
           // ページネーションで全データを取得
-          while (hasMore && (testMode ? page <= 1 : page <= 10)) { // テスト時は1ページ、本番時は最大10ページ
+          while (hasMore && page <= 50) { // 最大50ページ
             const repoIssues = await this.makeRequest<GitHubIssue[]>(`${this.baseURL}/repos/${orgName}/${repo.name}/issues`, params);
             
             allRepoIssues.push(...repoIssues);
             
             // 次のページがあるかチェック
-            hasMore = repoIssues.length === perPage;
+            hasMore = repoIssues.length === 100;
             page++;
             params.page = page;
           }
@@ -226,7 +222,7 @@ export class GitHubService {
   /**
    * GraphQLでPR数・レビュー数を一括取得（テストモード対応）
    */
-  async getPullRequestsAndReviewsGraphQL(orgName: string, dateRange: DateRange, testMode: boolean = false, targetMember?: string) {
+  async getPullRequestsAndReviewsGraphQL(orgName: string, dateRange: DateRange, targetMember?: string) {
     // 1年分の月リストを作成
     const months: string[] = [];
     let current = moment(dateRange.startDate).startOf('month');
@@ -236,10 +232,10 @@ export class GitHubService {
       current.add(1, 'month');
     }
 
-    // テストモードの場合は制限を設定（本番時は制限なしで全データ取得）
-    const repoLimit = testMode ? 3 : 100;   // 本番時は100個のリポジトリを一度に取得
-    const prLimit = testMode ? 10 : 100;    // 本番時は各リポジトリから100個のPRを一度に取得
-    const reviewLimit = testMode ? 5 : 100; // 本番時は各PRから100個のレビューを一度に取得
+    // 制限を設定（全データ取得）
+    const repoLimit = 100;   // 100個のリポジトリを一度に取得
+    const prLimit = 1000;    // 各リポジトリから1000個のPRを一度に取得
+    const reviewLimit = 1000; // 各PRから1000個のレビューを一度に取得
 
     console.log(`GraphQL取得設定: リポジトリ=${repoLimit}個/回, PR=${prLimit}個/回, レビュー=${reviewLimit}個/回 (ページネーション対応)`);
     if (targetMember) {
@@ -311,7 +307,7 @@ export class GitHubService {
     let repoCursor: string | null = null;
     let hasMoreRepos = true;
     let repoPageCount = 0;
-    const maxRepoPages = testMode ? 1 : 50; // 最大50ページ（5000個のリポジトリ）
+    const maxRepoPages = 100; // 最大100ページ（10000個のリポジトリ）
 
     console.log('=== リポジトリ取得開始 ===');
 
@@ -370,7 +366,7 @@ export class GitHubService {
         let hasMorePRs = true;
         let prPageCount = 0;
         let repoPRCount = 0;
-        const maxPRPages = testMode ? 1 : 50; // 最大50ページ（5000個のPR）
+        const maxPRPages = 50; // 最大50ページ（5000個のPR）
 
         console.log(`  ${repo.name}: PR取得開始`);
 
@@ -439,9 +435,9 @@ export class GitHubService {
             if (pr.reviews) {
               let reviewCursor: string | null = null;
               let hasMoreReviews = true;
-              let reviewPageCount = 0;
-              let prReviewCount = 0;
-              const maxReviewPages = testMode ? 1 : 20; // 最大20ページ（2000個のレビュー）
+                      let reviewPageCount = 0;
+        let prReviewCount = 0;
+        const maxReviewPages = 20; // 最大20ページ（2000個のレビュー）
 
               // レビューのページネーション（制限なしで全レビューを取得）
               while (hasMoreReviews && reviewPageCount < maxReviewPages) {
@@ -542,13 +538,13 @@ export class GitHubService {
   /**
    * REST APIでPR数を取得（GraphQLのフォールバック）
    */
-  async getPullRequestsREST(orgName: string, dateRange: DateRange, testMode: boolean = false, targetMember?: string): Promise<any[]> {
+  async getPullRequestsREST(orgName: string, dateRange: DateRange, targetMember?: string): Promise<any[]> {
     const pullRequests: any[] = [];
     const repos = await this.getRepositories(orgName);
 
     // テストモードの場合は最新の3個のリポジトリのみ使用
-    const targetRepos = testMode ? repos.slice(0, 3) : repos; // 制限なしで全リポジトリを取得
-    const perPage = testMode ? 10 : 100;
+    const targetRepos = repos; // 制限なしで全リポジトリを取得
+    const perPage = 100;
 
     console.log(`REST API PR取得: ${targetRepos.length}個のリポジトリから、各${perPage}個ずつ (ページネーション対応)`);
     if (targetMember) {
@@ -568,7 +564,7 @@ export class GitHubService {
           let page = 1;
           let hasMore = true;
           let repoPRCount = 0;
-          const maxPages = testMode ? 1 : 50; // 最大50ページ（5000個のPR）
+          const maxPages = 50; // 最大50ページ（5000個のPR）
 
           // 特定メンバーが指定されている場合は、そのメンバーのPRのみを取得
           const params: any = {
@@ -632,15 +628,15 @@ export class GitHubService {
     return pullRequests;
   }
 
-  async getCommits(orgName: string, dateRange: DateRange, testMode: boolean = false, targetMember?: string): Promise<GitHubCommit[]> {
+  async getCommits(orgName: string, dateRange: DateRange, targetMember?: string): Promise<GitHubCommit[]> {
     const commits: GitHubCommit[] = [];
     const repos = await this.getRepositories(orgName);
 
     // テストモードの場合は最新の3個のリポジトリのみ使用
-    const targetRepos = testMode ? repos.slice(0, 3) : repos; // 制限なしで全リポジトリを取得
-    const perPage = testMode ? 10 : 100; // テスト時は各リポジトリから10個のコミットのみ
+    const targetRepos = repos; // 制限なしで全リポジトリを取得
+    const perPage = 100; // テスト時は各リポジトリから10個のコミットのみ
 
-    console.log(`コミット取得: ${targetRepos.length}個のリポジトリから、各${perPage}個ずつ (ページネーション対応)`);
+    console.log(`コミット取得: ${targetRepos.length}個のリポジトリから、各${perPage}個ずつ (最大100ページ、10000個まで)`);
     if (targetMember) {
       console.log(`特定メンバー指定: ${targetMember}`);
     }
@@ -658,7 +654,7 @@ export class GitHubService {
           let page = 1;
           let hasMore = true;
           let repoCommitCount = 0;
-          const maxPages = testMode ? 1 : 50; // 最大50ページ（5000個のコミット）
+          const maxPages = 100; // 最大100ページ（10000個のコミット）
 
           // 特定メンバーが指定されている場合は、そのメンバーのコミットのみを取得
           const params: any = {
@@ -726,7 +722,7 @@ export class GitHubService {
   async getReviews(orgName: string, pullRequests: any[], dateRange: DateRange): Promise<GitHubReview[]> {
     const reviews: GitHubReview[] = [];
 
-    console.log(`レビュー取得開始: ${pullRequests.length}個のPRからレビューを取得 (ページネーション対応)`);
+    console.log(`レビュー取得開始: ${pullRequests.length}個のPRからレビューを取得 (最大50ページ、5000個まで)`);
 
     let totalPRs = 0;
     let totalReviews = 0;
@@ -742,7 +738,7 @@ export class GitHubService {
           let hasMore = true;
           const prReviews: GitHubReview[] = [];
           let prReviewCount = 0;
-          const maxPages = 20; // 最大20ページ（2000個のレビュー）
+          const maxPages = 50; // 最大50ページ（5000個のレビュー）
 
           console.log(`  PR #${pr.number} (${repoName}): レビュー取得開始`);
 
@@ -789,8 +785,8 @@ export class GitHubService {
     return reviews;
   }
 
-  async getAllMemberActivities(orgName: string, dateRange: DateRange, testMode: boolean = false, targetMember?: string): Promise<MemberActivity[]> {
-    console.log(`=== データ取得開始 (${testMode ? 'テストモード' : '本番モード'}) ===`);
+  async getAllMemberActivities(orgName: string, dateRange: DateRange, targetMember?: string): Promise<MemberActivity[]> {
+    console.log(`=== データ取得開始 (本番モード) ===`);
     if (targetMember) {
       console.log(`特定メンバー指定: ${targetMember}`);
     }
@@ -809,18 +805,18 @@ export class GitHubService {
     }
     
     console.log('Fetching issues...');
-    const issues = await this.getIssues(orgName, dateRange, testMode, targetMember);
+    const issues = await this.getIssues(orgName, dateRange, targetMember);
     
     console.log('Fetching pull requests and reviews...');
     let pullRequests: any[] = [];
     try {
       // まずGraphQLで試行
-      pullRequests = await this.getPullRequestsAndReviewsGraphQL(orgName, dateRange, testMode, targetMember);
+      pullRequests = await this.getPullRequestsAndReviewsGraphQL(orgName, dateRange, targetMember);
       console.log('GraphQL取得成功');
     } catch (error: any) {
       console.log('GraphQL取得失敗、REST APIにフォールバック:', error.message);
       // GraphQLが失敗した場合、REST APIでPRを取得
-      const prs = await this.getPullRequestsREST(orgName, dateRange, testMode, targetMember);
+      const prs = await this.getPullRequestsREST(orgName, dateRange, targetMember);
       const reviews = await this.getReviews(orgName, prs, dateRange);
       
       // REST APIの結果をGraphQLと同じ形式に変換
@@ -859,7 +855,7 @@ export class GitHubService {
     }
     
     console.log('Fetching commits...');
-    const commits = await this.getCommits(orgName, dateRange, testMode, targetMember);
+    const commits = await this.getCommits(orgName, dateRange, targetMember);
     
     // レビューはGraphQLで既に取得済みのため、ここでの処理を削除
     console.log('Processing member activities...');

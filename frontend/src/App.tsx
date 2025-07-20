@@ -15,16 +15,15 @@ interface WeeklyData {
 }
 
 function App() {
+  // 基本設定
   const [organizations, setOrganizations] = useState<Organization[]>([]);
-  const [selectedMember, setSelectedMember] = useState<string | null>(null);
-  const [startDate, setStartDate] = useState<string>('');
-  const [endDate, setEndDate] = useState<string>('');
-  const [activities, setActivities] = useState<MemberActivity[]>([]);
-  const [lastUpdated, setLastUpdated] = useState<string | null>(null);
-  const [isLoading, setIsLoading] = useState(false);
   const [isFetching, setIsFetching] = useState(false);
-  const [testMode, setTestMode] = useState(false);
+  const [lastUpdated, setLastUpdated] = useState<string>('');
+  
+  // データ関連のstate
+  const [activities, setActivities] = useState<MemberActivity[]>([]);
   const [organizationStats, setOrganizationStats] = useState<{ [key: string]: { count: number, lastUpdated: string | null } }>({});
+  const [selectedMember, setSelectedMember] = useState<string>('');
   
   // 週単位データ関連のstate
   const [weeklyData, setWeeklyData] = useState<{ [key: string]: WeeklyData[] }>({});
@@ -34,30 +33,40 @@ function App() {
   const [showConfirmDialog, setShowConfirmDialog] = useState(false);
   const [confirmDialogData, setConfirmDialogData] = useState<{ orgName: string, weekStart: string, weekEnd: string } | null>(null);
   
-  // 月単位選択関連のstate
-  const [selectedMonth, setSelectedMonth] = useState<string>('');
-  const [showMemberTable, setShowMemberTable] = useState(false);
+  // 月毎データ関連のstate
+  const [monthlyData, setMonthlyData] = useState<{ [key: string]: { monthKey: string, monthStart: string, monthEnd: string, lastUpdated: string }[] }>({});
+  const [fetchMonth, setFetchMonth] = useState<string>('');
+  const [isFetchingMonthly, setIsFetchingMonthly] = useState(false);
+  const [showMonthlyConfirmDialog, setShowMonthlyConfirmDialog] = useState(false);
+  const [monthlyConfirmDialogData, setMonthlyConfirmDialogData] = useState<{ orgName: string, monthStart: string, monthEnd: string } | null>(null);
+  
+  // 表示期間関連のstate
+  const [displayStartMonth, setDisplayStartMonth] = useState<string>('');
+  const [displayEndMonth, setDisplayEndMonth] = useState<string>('');
+  const [showPeriodSummary, setShowPeriodSummary] = useState(false);
 
   useEffect(() => {
     loadOrganizations();
     loadActivities();
     loadOrganizationStats();
+    loadMonthlyData();
   }, []);
 
-  useEffect(() => {
-    // デフォルトで3ヶ月前から今日までを設定
-    const today = moment();
-    const threeMonthsAgo = moment().subtract(3, 'months');
-    setStartDate(threeMonthsAgo.format('YYYY-MM-DD'));
-    setEndDate(today.format('YYYY-MM-DD'));
-  }, []);
 
-  // 組織が読み込まれた後に週単位データを読み込み
+
+  // 組織が読み込まれた後にデータを読み込み
   useEffect(() => {
     if (organizations.length > 0) {
-      loadWeeklyData();
+      loadActivities();
+      loadOrganizationStats();
+      loadMonthlyData();
     }
   }, [organizations]);
+
+  // 表示期間が変更されたときにデータを再読み込み
+  useEffect(() => {
+    loadDisplayPeriodData();
+  }, [displayStartMonth, displayEndMonth]);
 
   const loadOrganizations = async () => {
     try {
@@ -69,17 +78,16 @@ function App() {
   };
 
   const loadActivities = async () => {
-    setIsLoading(true);
     try {
       const data = await api.getActivities();
       console.log('Debug: Loaded activities data:', data);
       setActivities(data.activities);
-      setLastUpdated(data.lastUpdated);
+      if (data.lastUpdated) {
+        setLastUpdated(data.lastUpdated);
+      }
       setOrganizationStats(data.organizations || {});
     } catch (error) {
       console.error('Error loading activities:', error);
-    } finally {
-      setIsLoading(false);
     }
   };
 
@@ -124,11 +132,11 @@ function App() {
   const handleFetchWeeklyData = async (orgName: string, weekStart: string, weekEnd: string, forceUpdate: boolean = false) => {
     setIsFetchingWeekly(true);
     try {
-      await api.fetchWeeklyData(orgName, weekStart, weekEnd, testMode, forceUpdate);
+      await api.fetchWeeklyData(orgName, weekStart, weekEnd, forceUpdate);
       await loadWeeklyData();
       await loadActivities();
       await loadOrganizationStats();
-      alert(`週単位データの取得が完了しました (${testMode ? 'テストモード' : '本番モード'})`);
+      alert(`週単位データの取得が完了しました`);
     } catch (error: any) {
       if (error.message === 'Week data already exists') {
         // 既に取得済みの場合は確認ダイアログを表示
@@ -154,13 +162,12 @@ function App() {
         confirmDialogData.orgName, 
         confirmDialogData.weekStart, 
         confirmDialogData.weekEnd, 
-        testMode, 
         true
       );
       await loadWeeklyData();
       await loadActivities();
       await loadOrganizationStats();
-      alert(`週単位データの強制更新が完了しました (${testMode ? 'テストモード' : '本番モード'})`);
+      alert(`週単位データの強制更新が完了しました`);
     } catch (error) {
       console.error('Error force updating weekly data:', error);
       alert('週単位データの強制更新に失敗しました');
@@ -188,83 +195,133 @@ function App() {
     }
   };
 
-  // 月単位選択の処理
-  const handleMonthChange = (month: string) => {
-    console.log('Month changed to:', month);
-    setSelectedMonth(month);
-    if (month) {
-      const startDate = moment(month).startOf('month').format('YYYY-MM-DD');
-      const endDate = moment(month).endOf('month').format('YYYY-MM-DD');
-      setStartDate(startDate);
-      setEndDate(endDate);
-      setShowMemberTable(true);
+  // 月毎データを読み込み
+  const loadMonthlyData = async () => {
+    try {
+      const monthlyDataMap: { [key: string]: { monthKey: string, monthStart: string, monthEnd: string, lastUpdated: string }[] } = {};
       
-      // データを再読み込み
-      loadActivities();
-      loadWeeklyData();
-    } else {
-      setShowMemberTable(false);
+      for (const org of organizations) {
+        try {
+          const data = await api.getMonthlyData(org.name);
+          monthlyDataMap[org.name] = data.fetchedMonths || [];
+        } catch (error) {
+          console.error(`Error loading monthly data for ${org.name}:`, error);
+          monthlyDataMap[org.name] = [];
+        }
+      }
+      
+      setMonthlyData(monthlyDataMap);
+    } catch (error) {
+      console.error('Error loading monthly data:', error);
     }
   };
 
-  // 月単位データをフィルタリング
-  const getFilteredActivities = (): MemberActivity[] => {
-    if (!selectedMonth) return activities;
-    
-    const startDate = moment(selectedMonth).startOf('month').format('YYYY-MM-DD');
-    const endDate = moment(selectedMonth).endOf('month').format('YYYY-MM-DD');
-    
-    console.log('Filtering activities for month:', selectedMonth);
-    console.log('Date range:', startDate, 'to', endDate);
-    
-    const filteredActivities: MemberActivity[] = [];
-    
-    activities.forEach(activity => {
-      // 各メンバーの活動データから指定月のデータのみを抽出
-      const filteredMonthData: { [yearMonth: string]: { issues: number; pullRequests: number; commits: number; reviews: number } } = {};
+  // 月毎データを取得
+  const handleFetchMonthlyData = async (orgName: string, monthStart: string, monthEnd: string, forceUpdate: boolean = false) => {
+    // 既存データのチェック
+    if (!forceUpdate) {
+      const existingData = monthlyData[orgName] || [];
+      const monthKey = moment(monthStart).format('YYYY-MM');
+      const isAlreadyFetched = existingData.some(month => month.monthKey === monthKey);
       
-      Object.entries(activity.activities).forEach(([yearMonth, data]) => {
-        const activityDate = moment(yearMonth, 'YYYY-MM');
-        const monthStart = moment(startDate);
-        const monthEnd = moment(endDate);
-        
-        if (activityDate.isBetween(monthStart, monthEnd, 'month', '[]')) {
-          filteredMonthData[yearMonth] = data;
-          console.log(`Including ${yearMonth} data for ${activity.login}:`, data);
-        }
-      });
-      
-      // フィルタリングされたデータがある場合のみ追加
-      if (Object.keys(filteredMonthData).length > 0) {
-        filteredActivities.push({
-          ...activity,
-          activities: filteredMonthData
-        });
-        console.log(`Added filtered data for ${activity.login}:`, filteredMonthData);
+      if (isAlreadyFetched) {
+        // 既に取得済みの場合は確認ダイアログを表示
+        setMonthlyConfirmDialogData({ orgName, monthStart, monthEnd });
+        setShowMonthlyConfirmDialog(true);
+        return;
       }
-    });
+    }
+
+    setIsFetchingMonthly(true);
+    try {
+      await api.fetchMonthlyData(orgName, monthStart, monthEnd, forceUpdate);
+      await loadMonthlyData();
+      alert(`月毎データの取得が完了しました`);
+    } catch (error: any) {
+      console.error('Error fetching monthly data:', error);
+      alert('月毎データの取得に失敗しました');
+    } finally {
+      setIsFetchingMonthly(false);
+    }
+  };
+
+  // 月毎確認ダイアログで強制更新を実行
+  const handleMonthlyForceUpdate = async () => {
+    if (!monthlyConfirmDialogData) return;
     
-    console.log('Filtered activities count:', filteredActivities.length);
-    return filteredActivities;
+    setShowMonthlyConfirmDialog(false);
+    setIsFetchingMonthly(true);
+    try {
+      await api.fetchMonthlyData(
+        monthlyConfirmDialogData.orgName, 
+        monthlyConfirmDialogData.monthStart, 
+        monthlyConfirmDialogData.monthEnd, 
+        true
+      );
+      await loadMonthlyData();
+      alert(`月毎データの強制更新が完了しました`);
+    } catch (error) {
+      console.error('Error force updating monthly data:', error);
+      alert('月毎データの強制更新に失敗しました');
+    } finally {
+      setIsFetchingMonthly(false);
+      setMonthlyConfirmDialogData(null);
+    }
+  };
+
+  // 月毎データを削除
+  const handleDeleteMonthlyData = async (orgName: string, monthStart: string) => {
+    if (!window.confirm(`月 ${monthStart} のデータを削除しますか？`)) {
+      return;
+    }
+    
+    try {
+      await api.deleteMonthlyData(orgName, monthStart);
+      await loadMonthlyData();
+      alert('月毎データを削除しました');
+    } catch (error) {
+      console.error('Error deleting monthly data:', error);
+      alert('月毎データの削除に失敗しました');
+    }
+  };
+
+
+
+  // 表示期間のデータを読み込み
+  const loadDisplayPeriodData = async () => {
+    if (!displayStartMonth || !displayEndMonth) return;
+    
+    try {
+      console.log('Loading display period data:', { displayStartMonth, displayEndMonth });
+      const data = await api.getMonthlyActivities(displayStartMonth, displayEndMonth);
+      console.log('Received data:', data);
+      setActivities(data.activities);
+      setOrganizationStats(data.organizations);
+      setLastUpdated(new Date().toISOString());
+      setShowPeriodSummary(true); // 期間サマリーを表示
+      console.log('Set showPeriodSummary to true');
+    } catch (error) {
+      console.error('Error loading display period data:', error);
+    }
   };
 
   const handleFetchAllOrganizations = async () => {
-    if (!startDate || !endDate) {
-      alert('開始日、終了日を選択してください');
+    if (!selectedWeekStart || !selectedWeekEnd) {
+      alert('開始日と終了日を選択してください');
       return;
     }
 
-    setIsFetching(true);
+    setIsFetchingWeekly(true);
     try {
-      const result = await api.fetchAllOrganizations(startDate, endDate, testMode);
-      await loadActivities();
-      await loadOrganizationStats();
-      alert(`全組織のデータ取得が完了しました (${testMode ? 'テストモード' : '本番モード'})\n総取得数: ${result.totalCount}件`);
+      for (const org of organizations) {
+        await handleFetchWeeklyData(org.name, selectedWeekStart, selectedWeekEnd);
+      }
+      alert('週単位データの取得が完了しました');
     } catch (error) {
-      console.error('Error fetching all organizations data:', error);
-      alert('全組織のデータ取得に失敗しました');
+      console.error('Error fetching weekly data for all organizations:', error);
+      alert('週単位データの取得に失敗しました');
     } finally {
-      setIsFetching(false);
+      setIsFetchingWeekly(false);
     }
   };
 
@@ -326,273 +383,199 @@ function App() {
   const totalActivities = Object.values(organizationStats).reduce((sum, stat) => sum + stat.count, 0);
 
   return (
-    <div className="min-h-screen bg-gray-50">
+    <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100">
       <div className="container mx-auto px-4 py-8">
-        <h1 className="text-3xl font-bold text-gray-900 mb-8 text-center">
-          Git Status - GitHub活動データ
+        <h1 className="text-4xl font-bold text-gray-900 mb-8 text-center">
+          GitStatus - GitHub活動データ
         </h1>
 
         <RateLimitDisplay />
 
         {/* 組織統計表示 */}
-        <div className="bg-white rounded-lg shadow-md p-6 mb-8">
-          <h2 className="text-xl font-semibold text-gray-900 mb-4">組織別統計</h2>
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+        <div className="bg-white rounded-xl shadow-lg p-6 mb-8">
+          <h2 className="text-2xl font-semibold text-gray-900 mb-6">組織別統計</h2>
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
             {organizations.map((org) => {
               const stats = organizationStats[org.name] || { count: 0, lastUpdated: null };
               return (
-                <div key={org.name} className="border rounded-lg p-4">
-                  <h3 className="font-semibold text-gray-900 mb-2">{org.displayName}</h3>
-                  <div className="text-sm text-gray-600">
-                    <div>活動数: {stats.count.toLocaleString()}件</div>
+                <div key={org.name} className="bg-gradient-to-r from-blue-50 to-indigo-50 border border-blue-200 rounded-lg p-4 hover:shadow-md transition-shadow">
+                  <h3 className="font-semibold text-gray-900 mb-3 text-lg">{org.displayName}</h3>
+                  <div className="text-sm text-gray-600 space-y-1">
+                    <div className="flex justify-between">
+                      <span>メンバー数:</span>
+                      <span className="font-semibold text-blue-600">{stats.count.toLocaleString()}人</span>
+                    </div>
                     {stats.lastUpdated && (
-                      <div>更新: {moment(stats.lastUpdated).format('M/D H:mm')}</div>
+                      <div className="flex justify-between">
+                        <span>更新:</span>
+                        <span className="text-gray-500">{moment(stats.lastUpdated).format('M/D H:mm')}</span>
+                      </div>
                     )}
                   </div>
                 </div>
               );
             })}
-            <div className="border rounded-lg p-4 bg-blue-50">
-              <h3 className="font-semibold text-gray-900 mb-2">合計</h3>
-              <div className="text-sm text-gray-600">
-                <div>総活動数: {totalActivities.toLocaleString()}件</div>
+            <div className="bg-gradient-to-r from-green-50 to-emerald-50 border border-green-200 rounded-lg p-4">
+              <h3 className="font-semibold text-gray-900 mb-3 text-lg">合計</h3>
+              <div className="text-sm text-gray-600 space-y-1">
+                <div className="flex justify-between">
+                  <span>総活動数:</span>
+                  <span className="font-semibold text-green-600">{totalActivities.toLocaleString()}件</span>
+                </div>
                 {lastUpdated && (
-                  <div>最終更新: {moment(lastUpdated).format('M/D H:mm')}</div>
+                  <div className="flex justify-between">
+                    <span>最終更新:</span>
+                    <span className="text-gray-500">{moment(lastUpdated).format('M/D H:mm')}</span>
+                  </div>
                 )}
               </div>
             </div>
           </div>
         </div>
 
-        <div className="bg-white rounded-lg shadow-md p-6 mb-8">
-          <h2 className="text-xl font-semibold text-gray-900 mb-4">設定</h2>
+        {/* データ取得設定 */}
+        <div className="mb-8">
+          <h2 className="text-2xl font-semibold mb-6">データ取得設定</h2>
           
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 mb-6">
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">
-                開始日
-              </label>
-              <input
-                type="date"
-                value={startDate}
-                onChange={(e) => setStartDate(e.target.value)}
-                max={endDate}
-                className="w-full p-3 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-              />
-            </div>
-
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">
-                終了日
-              </label>
-              <input
-                type="date"
-                value={endDate}
-                onChange={(e) => setEndDate(e.target.value)}
-                min={startDate}
-                max={moment().format('YYYY-MM-DD')}
-                className="w-full p-3 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-              />
-            </div>
-
-            <div className="flex items-end space-x-2">
-              <div className="flex items-center">
+          <div className="bg-white rounded-xl shadow-lg p-6">
+            <h3 className="text-xl font-medium mb-4">月毎データ取得</h3>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+              <div>
+                <label className="block text-sm font-medium mb-2 text-gray-700">取得する月</label>
                 <input
-                  type="checkbox"
-                  id="testMode"
-                  checked={testMode}
-                  onChange={(e) => setTestMode(e.target.checked)}
-                  className="mr-2"
+                  type="month"
+                  value={fetchMonth}
+                  onChange={(e) => setFetchMonth(e.target.value)}
+                  className="w-full p-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                 />
-                <label htmlFor="testMode" className="text-sm text-gray-700">
-                  テストモード
-                </label>
+              </div>
+              <div className="flex items-end">
+                <button
+                  onClick={() => {
+                    if (fetchMonth) {
+                      const monthStart = moment(fetchMonth).startOf('month').format('YYYY-MM-DD');
+                      const monthEnd = moment(fetchMonth).endOf('month').format('YYYY-MM-DD');
+                      
+                      // 各組織に対して個別にチェックして取得
+                      organizations.forEach(org => {
+                        handleFetchMonthlyData(org.name, monthStart, monthEnd);
+                      });
+                    }
+                  }}
+                  disabled={!fetchMonth || isFetchingMonthly}
+                  className="w-full bg-gradient-to-r from-blue-500 to-blue-600 text-white py-3 px-6 rounded-lg hover:from-blue-600 hover:to-blue-700 disabled:from-gray-400 disabled:to-gray-500 transition-all duration-200 font-medium"
+                >
+                  {isFetchingMonthly ? (
+                    <span className="flex items-center justify-center">
+                      <svg className="animate-spin -ml-1 mr-3 h-5 w-5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                      </svg>
+                      取得中...
+                    </span>
+                  ) : (
+                    '月毎データ取得（全組織）'
+                  )}
+                </button>
               </div>
             </div>
           </div>
-
-          <div className="flex space-x-4 mb-4">
-            <button
-              onClick={handleFetchAllOrganizations}
-              disabled={isFetching || !startDate || !endDate}
-              className={`py-3 px-6 rounded-md transition-colors ${
-                testMode 
-                  ? 'bg-orange-600 hover:bg-orange-700 text-white' 
-                  : 'bg-blue-600 hover:bg-blue-700 text-white'
-              } disabled:bg-gray-400 disabled:cursor-not-allowed`}
-            >
-              {isFetching ? 'データ取得中...' : `${testMode ? 'テスト' : ''}データ取得（全組織）`}
-            </button>
-          </div>
-
-          {lastUpdated && (
-            <div className="text-sm text-gray-600">
-              最終更新: {moment(lastUpdated).format('YYYY年M月D日 H:mm')}
-            </div>
-          )}
         </div>
 
-        {/* 週単位データ取得 */}
-        <div className="bg-white rounded-lg shadow-md p-6 mb-8">
-          <h2 className="text-xl font-semibold text-gray-900 mb-4">週単位データ取得</h2>
+        {/* 取得済みデータ表示 */}
+        <div className="mb-8">
+          <h2 className="text-2xl font-semibold mb-6">取得済みデータ</h2>
           
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">
-                週の開始日
-              </label>
-              <input
-                type="date"
-                value={selectedWeekStart}
-                onChange={(e) => {
-                  setSelectedWeekStart(e.target.value);
-                  if (e.target.value) {
-                    const { start, end } = getWeekRange(e.target.value);
-                    setSelectedWeekStart(start);
-                    setSelectedWeekEnd(end);
-                  }
-                }}
-                className="w-full p-3 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-              />
-            </div>
-
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">
-                週の終了日
-              </label>
-              <input
-                type="date"
-                value={selectedWeekEnd}
-                onChange={(e) => setSelectedWeekEnd(e.target.value)}
-                className="w-full p-3 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-                readOnly
-              />
-            </div>
-
-            <div className="flex items-end">
-              <button
-                onClick={() => {
-                  if (selectedWeekStart && selectedWeekEnd) {
-                    organizations.forEach(org => {
-                      handleFetchWeeklyData(org.name, selectedWeekStart, selectedWeekEnd);
-                    });
-                  } else {
-                    alert('週の開始日を選択してください');
-                  }
-                }}
-                disabled={isFetchingWeekly || !selectedWeekStart || !selectedWeekEnd}
-                className={`w-full py-3 px-6 rounded-md transition-colors ${
-                  testMode 
-                    ? 'bg-orange-600 hover:bg-orange-700 text-white' 
-                    : 'bg-green-600 hover:bg-green-700 text-white'
-                } disabled:bg-gray-400 disabled:cursor-not-allowed`}
-              >
-                {isFetchingWeekly ? '取得中...' : `${testMode ? 'テスト' : ''}週単位データ取得`}
-              </button>
-            </div>
-          </div>
-
-          {/* 取得済み週一覧 */}
-          <div className="mb-6">
-            <h3 className="text-lg font-medium text-gray-900 mb-3">取得済み週一覧</h3>
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-              {organizations.map((org) => {
-                const orgWeeks = weeklyData[org.name] || [];
-                return (
-                  <div key={org.name} className="border rounded-lg p-4">
-                    <h4 className="font-semibold text-gray-900 mb-2">{org.displayName}</h4>
-                    {orgWeeks.length === 0 ? (
-                      <p className="text-sm text-gray-500">取得済みの週はありません</p>
-                    ) : (
-                      <div className="space-y-2">
-                        {orgWeeks.map((week) => (
-                          <div key={week.weekKey} className="flex items-center justify-between text-sm">
-                            <div>
-                              <div className="font-medium">{week.weekKey}</div>
-                              <div className="text-gray-500">
-                                {moment(week.weekStart).format('M/D')} - {moment(week.weekEnd).format('M/D')}
-                              </div>
-                            </div>
-                            <div className="flex space-x-2">
-                              <button
-                                onClick={() => handleFetchWeeklyData(org.name, week.weekStart, week.weekEnd, true)}
-                                className="text-blue-600 hover:text-blue-800 text-xs"
-                                title="再取得"
-                              >
-                                再取得
-                              </button>
-                              <button
-                                onClick={() => handleDeleteWeeklyData(org.name, week.weekStart)}
-                                className="text-red-600 hover:text-red-800 text-xs"
-                                title="削除"
-                              >
-                                削除
-                              </button>
-                            </div>
-                          </div>
-                        ))}
+          <div className="bg-white rounded-xl shadow-lg p-6">
+            <h3 className="text-xl font-medium mb-4">月毎データ</h3>
+            {Object.entries(monthlyData).map(([orgName, months]) => (
+              <div key={orgName} className="mb-6 last:mb-0">
+                <h4 className="font-semibold text-gray-800 mb-3 text-lg border-b border-gray-200 pb-2">{orgName}</h4>
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+                  {months.map((month) => (
+                    <div key={month.monthKey} className="flex items-center justify-between bg-gradient-to-r from-gray-50 to-gray-100 p-3 rounded-lg border border-gray-200 hover:shadow-md transition-shadow">
+                      <div className="flex-1">
+                        <div className="font-medium text-gray-900">{month.monthKey}</div>
+                        <div className="text-xs text-gray-500 mt-1">
+                          最終更新: {moment(month.lastUpdated).format('YYYY-MM-DD HH:mm')}
+                        </div>
                       </div>
-                    )}
-                  </div>
-                );
-              })}
+                      <button
+                        onClick={() => handleDeleteMonthlyData(orgName, month.monthStart)}
+                        className="ml-3 text-red-500 hover:text-red-700 text-sm bg-white px-2 py-1 rounded border border-red-200 hover:bg-red-50 transition-colors"
+                        title="削除"
+                      >
+                        削除
+                      </button>
+                    </div>
+                  ))}
+                  {months.length === 0 && (
+                    <div className="col-span-full text-center py-8 text-gray-500">
+                      <svg className="mx-auto h-12 w-12 text-gray-400 mb-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                      </svg>
+                      取得済みの月毎データがありません
+                    </div>
+                  )}
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        {/* 表示期間設定 */}
+        <div className="mb-8">
+          <h2 className="text-2xl font-semibold mb-6">表示期間設定</h2>
+          <div className="bg-white rounded-xl shadow-lg p-6">
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+              <div>
+                <label className="block text-sm font-medium mb-2 text-gray-700">開始月</label>
+                <input
+                  type="month"
+                  value={displayStartMonth}
+                  onChange={(e) => setDisplayStartMonth(e.target.value)}
+                  className="w-full p-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-500 focus:border-transparent"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium mb-2 text-gray-700">終了月</label>
+                <input
+                  type="month"
+                  value={displayEndMonth}
+                  onChange={(e) => setDisplayEndMonth(e.target.value)}
+                  className="w-full p-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-500 focus:border-transparent"
+                />
+              </div>
+              <div className="flex items-end">
+                <button
+                  onClick={loadDisplayPeriodData}
+                  disabled={!displayStartMonth || !displayEndMonth}
+                  className="w-full bg-gradient-to-r from-green-500 to-green-600 text-white py-3 px-6 rounded-lg hover:from-green-600 hover:to-green-700 disabled:from-gray-400 disabled:to-gray-500 transition-all duration-200 font-medium"
+                >
+                  期間データ読み込み
+                </button>
+              </div>
             </div>
           </div>
         </div>
 
-        {/* 月単位選択 */}
-        <div className="bg-white rounded-lg shadow-md p-6 mb-8">
-          <h2 className="text-xl font-semibold text-gray-900 mb-4">月単位データ表示</h2>
-          
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">
-                表示月を選択
-              </label>
-              <input
-                type="month"
-                value={selectedMonth}
-                onChange={(e) => handleMonthChange(e.target.value)}
-                className="w-full p-3 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-              />
-            </div>
-            
-            <div className="flex items-end">
-              <button
-                onClick={() => setShowMemberTable(!showMemberTable)}
-                disabled={!selectedMonth}
-                className={`w-full py-3 px-6 rounded-md transition-colors ${
-                  showMemberTable 
-                    ? 'bg-gray-600 hover:bg-gray-700 text-white' 
-                    : 'bg-blue-600 hover:bg-blue-700 text-white'
-                } disabled:bg-gray-400 disabled:cursor-not-allowed`}
-              >
-                {showMemberTable ? 'メンバーテーブルを非表示' : 'メンバーテーブルを表示'}
-              </button>
-            </div>
-          </div>
-          
-          {selectedMonth && (
-            <div className="text-sm text-gray-600">
-              選択月: {moment(selectedMonth).format('YYYY年M月')}
-            </div>
-          )}
-        </div>
-
-        {/* 全メンバー活動テーブル */}
-        {showMemberTable && selectedMonth && (
+        {/* 最終更新日時 */}
+        {lastUpdated && (
           <div className="mb-8">
-            <MemberActivityTable
-              activities={getFilteredActivities()}
-              startDate={moment(selectedMonth).startOf('month').format('YYYY-MM-DD')}
-              endDate={moment(selectedMonth).endOf('month').format('YYYY-MM-DD')}
-            />
+            <div className="bg-white rounded-xl shadow-lg p-6">
+              <h3 className="text-lg font-medium mb-2 text-gray-900">最終更新日時</h3>
+              <p className="text-gray-600 text-lg">
+                データ最終更新: {moment(lastUpdated).format('YYYY年M月D日 H:mm:ss')}
+              </p>
+            </div>
           </div>
         )}
 
+
+
         {/* 表示設定 */}
-        <div className="bg-white rounded-lg shadow-md p-6 mb-8">
-          <h2 className="text-xl font-semibold text-gray-900 mb-4">全組織メンバー選択</h2>
+        <div className="bg-white rounded-xl shadow-lg p-6 mb-8">
+          <h2 className="text-2xl font-semibold text-gray-900 mb-6">全組織メンバー選択</h2>
           <MemberSelector
             selectedOrg=""
             selectedMember={selectedMember}
@@ -601,16 +584,50 @@ function App() {
           />
         </div>
 
-        {isLoading ? (
-          <div className="bg-white rounded-lg shadow-md p-6 text-center">
-            <div className="text-gray-500">データを読み込み中...</div>
+        {/* 全メンバー活動サマリー */}
+        {(() => {
+          const shouldShow = showPeriodSummary && displayStartMonth && displayEndMonth && activities.length > 0;
+          console.log('Checking period summary conditions:', {
+            showPeriodSummary,
+            displayStartMonth,
+            displayEndMonth,
+            activitiesLength: activities.length,
+            shouldShow
+          });
+          return shouldShow;
+        })() && (
+          <div className="bg-white rounded-xl shadow-lg p-6 mb-8">
+            <h2 className="text-2xl font-semibold text-gray-900 mb-6">
+              全メンバー活動サマリー ({moment(displayStartMonth).format('YYYY年M月')} - {moment(displayEndMonth).format('YYYY年M月')})
+            </h2>
+            <MemberActivityTable
+              activities={activities}
+              startDate={displayStartMonth}
+              endDate={displayEndMonth}
+            />
           </div>
-        ) : selectedMemberActivity && startDate && endDate ? (
-          <div className="bg-white rounded-lg shadow-md p-6">
+        )}
+
+        {/* デバッグ情報 */}
+        {showPeriodSummary && (
+          <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4 mb-8">
+            <h3 className="text-lg font-medium text-yellow-800 mb-2">デバッグ情報</h3>
+            <div className="text-sm text-yellow-700 space-y-1">
+              <div>showPeriodSummary: {showPeriodSummary.toString()}</div>
+              <div>displayStartMonth: {displayStartMonth || '未設定'}</div>
+              <div>displayEndMonth: {displayEndMonth || '未設定'}</div>
+              <div>activities.length: {activities.length}</div>
+              <div>条件満たす: {(showPeriodSummary && displayStartMonth && displayEndMonth && activities.length > 0).toString()}</div>
+            </div>
+          </div>
+        )}
+
+        {selectedMemberActivity && displayStartMonth && displayEndMonth ? (
+          <div className="bg-white rounded-xl shadow-lg p-6">
             <ActivityChart
               memberActivity={selectedMemberActivity}
-              startDate={startDate}
-              endDate={endDate}
+              startDate={displayStartMonth}
+              endDate={displayEndMonth}
             />
             
             {/* 組織別詳細情報 */}
@@ -619,7 +636,7 @@ function App() {
               if (memberActivities.length > 1) {
                 return (
                   <div className="mt-8">
-                    <h3 className="text-lg font-semibold text-gray-900 mb-4">組織別詳細</h3>
+                    <h3 className="text-xl font-semibold text-gray-900 mb-4">組織別詳細</h3>
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                       {memberActivities.map((activity, index) => {
                         const totalIssues = Object.values(activity.activities).reduce((sum, data) => sum + data.issues, 0);
@@ -628,15 +645,27 @@ function App() {
                         const totalReviews = Object.values(activity.activities).reduce((sum, data) => sum + data.reviews, 0);
                         
                         return (
-                          <div key={index} className="border rounded-lg p-4">
-                            <h4 className="font-semibold text-gray-900 mb-2">
+                          <div key={index} className="border border-gray-200 rounded-lg p-4 bg-gradient-to-r from-gray-50 to-gray-100">
+                            <h4 className="font-semibold text-gray-900 mb-3">
                               {activity.organizationDisplayName || activity.organization || '不明の組織'}
                             </h4>
-                            <div className="grid grid-cols-2 gap-2 text-sm">
-                              <div>イシュー: {totalIssues}</div>
-                              <div>プルリク: {totalPRs}</div>
-                              <div>コミット: {totalCommits}</div>
-                              <div>レビュー: {totalReviews}</div>
+                            <div className="grid grid-cols-2 gap-3 text-sm">
+                              <div className="flex justify-between">
+                                <span>イシュー:</span>
+                                <span className="font-medium">{totalIssues}</span>
+                              </div>
+                              <div className="flex justify-between">
+                                <span>プルリク:</span>
+                                <span className="font-medium">{totalPRs}</span>
+                              </div>
+                              <div className="flex justify-between">
+                                <span>コミット:</span>
+                                <span className="font-medium">{totalCommits}</span>
+                              </div>
+                              <div className="flex justify-between">
+                                <span>レビュー:</span>
+                                <span className="font-medium">{totalReviews}</span>
+                              </div>
                             </div>
                           </div>
                         );
@@ -649,30 +678,33 @@ function App() {
             })()}
           </div>
         ) : selectedMember ? (
-          <div className="bg-white rounded-lg shadow-md p-6 text-center">
-            <div className="text-gray-500">選択されたメンバーのデータが見つかりません</div>
+          <div className="bg-white rounded-xl shadow-lg p-6 text-center">
+            <div className="text-gray-500 text-lg">選択されたメンバーのデータが見つかりません</div>
           </div>
         ) : null}
 
         {/* 確認ダイアログ */}
         {showConfirmDialog && confirmDialogData && (
           <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-            <div className="bg-white rounded-lg p-6 max-w-md w-full mx-4">
-              <h3 className="text-lg font-semibold text-gray-900 mb-4">確認</h3>
-              <p className="text-gray-700 mb-6">
-                週 {confirmDialogData.weekStart} のデータは既に取得済みです。
-                再度取得しますか？
+            <div className="bg-white p-6 rounded-lg max-w-md w-full mx-4">
+              <h3 className="text-lg font-semibold mb-4">週単位データ再取得確認</h3>
+              <p className="mb-4">
+                {confirmDialogData.orgName} の {confirmDialogData.weekStart} - {confirmDialogData.weekEnd} のデータは既に取得済みです。
+                再取得しますか？
               </p>
               <div className="flex space-x-4">
                 <button
-                  onClick={() => setShowConfirmDialog(false)}
-                  className="flex-1 py-2 px-4 border border-gray-300 rounded-md text-gray-700 hover:bg-gray-50"
+                  onClick={() => {
+                    setShowConfirmDialog(false);
+                    setConfirmDialogData(null);
+                  }}
+                  className="flex-1 bg-gray-500 text-white py-2 px-4 rounded hover:bg-gray-600"
                 >
                   キャンセル
                 </button>
                 <button
                   onClick={handleForceUpdate}
-                  className="flex-1 py-2 px-4 bg-blue-600 text-white rounded-md hover:bg-blue-700"
+                  className="flex-1 bg-blue-500 text-white py-2 px-4 rounded hover:bg-blue-600"
                 >
                   再取得
                 </button>
@@ -680,6 +712,38 @@ function App() {
             </div>
           </div>
         )}
+
+        {/* 月毎確認ダイアログ */}
+        {showMonthlyConfirmDialog && monthlyConfirmDialogData && (
+          <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+            <div className="bg-white p-6 rounded-lg max-w-md w-full mx-4">
+              <h3 className="text-lg font-semibold mb-4">月毎データ再取得確認</h3>
+              <p className="mb-4">
+                {monthlyConfirmDialogData.orgName} の {monthlyConfirmDialogData.monthStart} - {monthlyConfirmDialogData.monthEnd} のデータは既に取得済みです。
+                再取得しますか？
+              </p>
+              <div className="flex space-x-4">
+                <button
+                  onClick={() => {
+                    setShowMonthlyConfirmDialog(false);
+                    setMonthlyConfirmDialogData(null);
+                  }}
+                  className="flex-1 bg-gray-500 text-white py-2 px-4 rounded hover:bg-gray-600"
+                >
+                  キャンセル
+                </button>
+                <button
+                  onClick={handleMonthlyForceUpdate}
+                  className="flex-1 bg-blue-500 text-white py-2 px-4 rounded hover:bg-blue-600"
+                >
+                  再取得
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* メンバー活動サマリー */}
       </div>
     </div>
   );
