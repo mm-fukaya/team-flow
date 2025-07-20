@@ -308,7 +308,7 @@ app.get('/api/organizations/stats', (req, res) => {
 // レートリミット情報を取得
 app.get('/api/rate-limit', async (req, res) => {
   try {
-    const rateLimitInfo = githubService.getRateLimitInfo();
+    const rateLimitInfo = await githubService.fetchRateLimitInfo();
     res.json({ rateLimitInfo });
   } catch (error) {
     console.error('Error fetching rate limit info:', error);

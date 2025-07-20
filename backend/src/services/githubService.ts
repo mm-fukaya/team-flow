@@ -913,8 +913,29 @@ export class GitHubService {
     return memberActivities;
   }
 
-  // レート制限情報を取得
+  // レート制限情報を取得（キャッシュされた情報）
   getRateLimitInfo(): RateLimitInfo | null {
     return this.rateLimitInfo;
+  }
+
+  // GitHub APIから直接レートリミット情報を取得
+  async fetchRateLimitInfo(): Promise<RateLimitInfo> {
+    try {
+      const response = await axios.get(`${this.baseURL}/rate_limit`, {
+        headers: this.getHeaders()
+      });
+      
+      const rateLimit = response.data.resources.core;
+      this.rateLimitInfo = {
+        limit: rateLimit.limit,
+        remaining: rateLimit.remaining,
+        reset: rateLimit.reset
+      };
+      
+      return this.rateLimitInfo;
+    } catch (error) {
+      console.error('Error fetching rate limit info:', error);
+      throw error;
+    }
   }
 } 
