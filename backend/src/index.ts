@@ -100,7 +100,7 @@ app.get('/api/activities/:orgName', (req, res) => {
 // データを取得して保存（組織ごと）
 app.post('/api/fetch-data', async (req, res) => {
   try {
-    const { orgName, startDate, endDate, testMode = false, targetMember } = req.body;
+    const { orgName, startDate, endDate } = req.body;
 
     if (!orgName || !startDate || !endDate) {
       return res.status(400).json({ 
@@ -110,18 +110,16 @@ app.post('/api/fetch-data', async (req, res) => {
 
     const dateRange: DateRange = { startDate, endDate };
     
-    console.log(`Fetching data for ${orgName} from ${startDate} to ${endDate} (testMode: ${testMode})${targetMember ? `, targetMember: ${targetMember}` : ''}`);
+    console.log(`Fetching data for ${orgName} from ${startDate} to ${endDate}`);
     
-    const activities = await githubService.getAllMemberActivities(orgName, dateRange, testMode, targetMember);
+    const activities = await githubService.getAllMemberActivities(orgName, dateRange);
     dataService.saveOrganizationActivities(orgName, activities);
 
     res.json({ 
-      message: `Data fetched and saved successfully for ${orgName} (${testMode ? 'TEST MODE' : 'PRODUCTION MODE'})${targetMember ? `, targetMember: ${targetMember}` : ''}`,
+      message: `Data fetched and saved successfully for ${orgName}`,
       count: activities.length,
       lastUpdated: new Date().toISOString(),
-      organization: orgName,
-      testMode,
-      targetMember
+      organization: orgName
     });
   } catch (error) {
     console.error('Error fetching data:', error);
@@ -132,7 +130,7 @@ app.post('/api/fetch-data', async (req, res) => {
 // 特定メンバーのデータを取得（テスト用）
 app.post('/api/fetch-member-data', async (req, res) => {
   try {
-    const { orgName, startDate, endDate, testMode = false, memberLogin = 'mm-kado' } = req.body;
+    const { orgName, startDate, endDate, memberLogin = 'mm-kado' } = req.body;
 
     if (!orgName || !startDate || !endDate) {
       return res.status(400).json({ 
@@ -142,18 +140,17 @@ app.post('/api/fetch-member-data', async (req, res) => {
 
     const dateRange: DateRange = { startDate, endDate };
     
-    console.log(`Fetching data for member ${memberLogin} in ${orgName} from ${startDate} to ${endDate} (testMode: ${testMode})`);
+    console.log(`Fetching data for member ${memberLogin} in ${orgName} from ${startDate} to ${endDate}`);
     
-    const activities = await githubService.getAllMemberActivities(orgName, dateRange, testMode, memberLogin);
+    const activities = await githubService.getAllMemberActivities(orgName, dateRange, memberLogin);
     dataService.saveOrganizationActivities(orgName, activities);
 
     res.json({ 
-      message: `Data fetched and saved successfully for member ${memberLogin} in ${orgName} (${testMode ? 'TEST MODE' : 'PRODUCTION MODE'})`,
+      message: `Data fetched and saved successfully for member ${memberLogin} in ${orgName}`,
       count: activities.length,
       lastUpdated: new Date().toISOString(),
       organization: orgName,
-      memberLogin,
-      testMode
+      memberLogin
     });
   } catch (error) {
     console.error('Error fetching member data:', error);
@@ -164,7 +161,7 @@ app.post('/api/fetch-member-data', async (req, res) => {
 // mm-kadoのデータを全ての組織から取得
 app.post('/api/fetch-mm-kado-all-orgs', async (req, res) => {
   try {
-    const { startDate, endDate, testMode = false, memberLogin = 'mm-kado' } = req.body;
+    const { startDate, endDate, memberLogin = 'mm-kado' } = req.body;
 
     if (!startDate || !endDate) {
       return res.status(400).json({ 
@@ -176,12 +173,12 @@ app.post('/api/fetch-mm-kado-all-orgs', async (req, res) => {
     const results: { [key: string]: { count: number, success: boolean, error?: string } } = {};
     const allActivities: any[] = [];
     
-    console.log(`Fetching data for member ${memberLogin} from all organizations from ${startDate} to ${endDate} (testMode: ${testMode})`);
+    console.log(`Fetching data for member ${memberLogin} from all organizations from ${startDate} to ${endDate}`);
     
     for (const org of organizations) {
       try {
         console.log(`Fetching data for member ${memberLogin} in organization: ${org.name}`);
-        const activities = await githubService.getAllMemberActivities(org.name, dateRange, testMode, memberLogin);
+        const activities = await githubService.getAllMemberActivities(org.name, dateRange, memberLogin);
         
         if (activities.length > 0) {
           // 組織情報を追加
@@ -222,12 +219,11 @@ app.post('/api/fetch-mm-kado-all-orgs', async (req, res) => {
     const totalCount = allActivities.length;
 
     res.json({ 
-      message: `Data fetched for member ${memberLogin} from all organizations (${testMode ? 'TEST MODE' : 'PRODUCTION MODE'})`,
+      message: `Data fetched for member ${memberLogin} from all organizations`,
       totalCount,
       lastUpdated: new Date().toISOString(),
       memberLogin,
-      results,
-      testMode
+      results
     });
   } catch (error) {
     console.error('Error fetching member data from all organizations:', error);
@@ -238,7 +234,7 @@ app.post('/api/fetch-mm-kado-all-orgs', async (req, res) => {
 // 全組織のデータを一括取得
 app.post('/api/fetch-all-organizations', async (req, res) => {
   try {
-    const { startDate, endDate, testMode = false } = req.body;
+    const { startDate, endDate } = req.body;
 
     if (!startDate || !endDate) {
       return res.status(400).json({ 
@@ -249,12 +245,12 @@ app.post('/api/fetch-all-organizations', async (req, res) => {
     const dateRange: DateRange = { startDate, endDate };
     const results: { [key: string]: { count: number, success: boolean, error?: string } } = {};
     
-    console.log(`Fetching data for all organizations from ${startDate} to ${endDate} (testMode: ${testMode})`);
+    console.log(`Fetching data for all organizations from ${startDate} to ${endDate}`);
     
     for (const org of organizations) {
       try {
         console.log(`Fetching data for organization: ${org.name}`);
-        const activities = await githubService.getAllMemberActivities(org.name, dateRange, testMode);
+        const activities = await githubService.getAllMemberActivities(org.name, dateRange);
         dataService.saveOrganizationActivities(org.name, activities);
         
         results[org.name] = {
@@ -276,11 +272,10 @@ app.post('/api/fetch-all-organizations', async (req, res) => {
     const totalCount = Object.values(results).reduce((sum, result) => sum + result.count, 0);
 
     res.json({ 
-      message: `Data fetched for all organizations (${testMode ? 'TEST MODE' : 'PRODUCTION MODE'})`,
+      message: `Data fetched for all organizations`,
       totalCount,
       lastUpdated: new Date().toISOString(),
-      results,
-      testMode
+      results
     });
   } catch (error) {
     console.error('Error fetching all organizations data:', error);
@@ -341,7 +336,7 @@ app.get('/api/weekly-data/:orgName', (req, res) => {
 // 週単位データを取得して保存
 app.post('/api/fetch-weekly-data', async (req, res) => {
   try {
-    const { orgName, weekStart, weekEnd, testMode = false, forceUpdate = false } = req.body;
+    const { orgName, weekStart, weekEnd, forceUpdate = false } = req.body;
 
     if (!orgName || !weekStart || !weekEnd) {
       return res.status(400).json({ 
@@ -362,19 +357,18 @@ app.post('/api/fetch-weekly-data', async (req, res) => {
 
     const dateRange: DateRange = { startDate: weekStart, endDate: weekEnd };
     
-    console.log(`Fetching weekly data for ${orgName} from ${weekStart} to ${weekEnd} (testMode: ${testMode}, forceUpdate: ${forceUpdate})`);
+    console.log(`Fetching weekly data for ${orgName} from ${weekStart} to ${weekEnd} (forceUpdate: ${forceUpdate})`);
     
-    const activities = await githubService.getAllMemberActivities(orgName, dateRange, testMode);
+    const activities = await githubService.getAllMemberActivities(orgName, dateRange);
     dataService.saveWeeklyActivities(orgName, weekStart, weekEnd, activities);
 
     res.json({ 
-      message: `Weekly data fetched and saved successfully for ${orgName} (${testMode ? 'TEST MODE' : 'PRODUCTION MODE'})`,
+      message: `Weekly data fetched and saved successfully for ${orgName}`,
       count: activities.length,
       lastUpdated: new Date().toISOString(),
       organization: orgName,
       weekStart,
       weekEnd,
-      testMode,
       forceUpdate
     });
   } catch (error) {
@@ -421,6 +415,127 @@ app.get('/api/weekly-activities', (req, res) => {
   } catch (error) {
     console.error('Error loading weekly activities:', error);
     res.status(500).json({ error: 'Failed to load weekly activities' });
+  }
+});
+
+// 月毎データ取得のAPIエンドポイントを追加
+app.get('/api/monthly-data/:orgName', (req, res) => {
+  try {
+    const { orgName } = req.params;
+    const fetchedMonths = dataService.getFetchedMonths(orgName);
+    
+    res.json({ 
+      organization: orgName,
+      fetchedMonths,
+      totalMonths: fetchedMonths.length
+    });
+  } catch (error) {
+    console.error('Error loading monthly data:', error);
+    res.status(500).json({ error: 'Failed to load monthly data' });
+  }
+});
+
+// 月毎データを取得して保存
+app.post('/api/fetch-monthly-data', async (req, res) => {
+  try {
+    const { orgName, monthStart, monthEnd, forceUpdate = false } = req.body;
+
+    if (!orgName || !monthStart || !monthEnd) {
+      return res.status(400).json({ 
+        error: 'Organization name, month start, and month end are required' 
+      });
+    }
+
+    // 既に取得済みの月かチェック
+    const isAlreadyFetched = dataService.isMonthFetched(orgName, monthStart);
+    if (isAlreadyFetched && !forceUpdate) {
+      return res.status(409).json({ 
+        error: 'Month data already exists',
+        monthStart,
+        monthEnd,
+        alreadyFetched: true
+      });
+    }
+
+    const dateRange: DateRange = { startDate: monthStart, endDate: monthEnd };
+    
+    console.log(`Fetching monthly data for ${orgName} from ${monthStart} to ${monthEnd} (forceUpdate: ${forceUpdate})`);
+    
+    const activities = await githubService.getAllMemberActivities(orgName, dateRange);
+    dataService.saveMonthlyActivities(orgName, monthStart, monthEnd, activities);
+
+    res.json({ 
+      message: `Monthly data fetched and saved successfully for ${orgName}`,
+      count: activities.length,
+      lastUpdated: new Date().toISOString(),
+      organization: orgName,
+      monthStart,
+      monthEnd,
+      forceUpdate
+    });
+  } catch (error) {
+    console.error('Error fetching monthly data:', error);
+    res.status(500).json({ error: 'Failed to fetch monthly data' });
+  }
+});
+
+// 月毎データを削除
+app.delete('/api/monthly-data/:orgName/:monthStart', (req, res) => {
+  try {
+    const { orgName, monthStart } = req.params;
+    
+    const deleted = dataService.deleteMonthlyActivities(orgName, monthStart);
+    
+    if (deleted) {
+      res.json({ 
+        message: `Monthly data deleted successfully for ${orgName} month ${monthStart}`,
+        organization: orgName,
+        monthStart
+      });
+    } else {
+      res.status(404).json({ 
+        error: 'Monthly data not found',
+        organization: orgName,
+        monthStart
+      });
+    }
+  } catch (error) {
+    console.error('Error deleting monthly data:', error);
+    res.status(500).json({ error: 'Failed to delete monthly data' });
+  }
+});
+
+// 指定期間の月毎データを統合して取得
+app.get('/api/monthly-activities', (req, res) => {
+  try {
+    const { startMonth, endMonth } = req.query;
+    
+    console.log('API /monthly-activities called with:', { startMonth, endMonth });
+    
+    if (!startMonth || !endMonth) {
+      return res.status(400).json({ 
+        error: 'Start month and end month are required' 
+      });
+    }
+
+    const { activities, organizations: orgStats } = dataService.loadAllOrganizationsMonthlyActivities(startMonth as string, endMonth as string);
+    
+    console.log('API /monthly-activities result:', { 
+      activitiesCount: activities.length, 
+      organizations: Object.keys(orgStats),
+      startMonth,
+      endMonth
+    });
+    
+    res.json({ 
+      activities, 
+      organizations: orgStats,
+      startMonth,
+      endMonth
+    });
+  } catch (error) {
+    console.error('Error loading monthly activities:', error);
+    res.status(500).json({ error: 'Failed to load monthly activities' });
   }
 });
 
