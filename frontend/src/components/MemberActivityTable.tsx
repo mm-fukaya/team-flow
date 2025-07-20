@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { MemberActivity } from '../types';
 
 interface MemberActivityTableProps {
@@ -6,6 +6,9 @@ interface MemberActivityTableProps {
   startDate: string;
   endDate: string;
 }
+
+type SortField = 'issues' | 'pullRequests' | 'commits' | 'reviews' | 'total';
+type SortDirection = 'asc' | 'desc';
 
 interface MemberSummary {
   login: string;
@@ -22,6 +25,9 @@ export const MemberActivityTable: React.FC<MemberActivityTableProps> = ({
   startDate,
   endDate
 }) => {
+  const [sortField, setSortField] = useState<SortField>('total');
+  const [sortDirection, setSortDirection] = useState<SortDirection>('desc');
+  
   console.log('MemberActivityTable received activities:', activities);
   console.log('Date range:', startDate, 'to', endDate);
   
@@ -77,14 +83,83 @@ export const MemberActivityTable: React.FC<MemberActivityTableProps> = ({
     }
   });
 
+  // ソート関数
+  const sortMembers = (members: MemberSummary[]): MemberSummary[] => {
+    return members.sort((a, b) => {
+      let aValue: number;
+      let bValue: number;
+      
+      switch (sortField) {
+        case 'issues':
+          aValue = a.totalIssues;
+          bValue = b.totalIssues;
+          break;
+        case 'pullRequests':
+          aValue = a.totalPullRequests;
+          bValue = b.totalPullRequests;
+          break;
+        case 'commits':
+          aValue = a.totalCommits;
+          bValue = b.totalCommits;
+          break;
+        case 'reviews':
+          aValue = a.totalReviews;
+          bValue = b.totalReviews;
+          break;
+        case 'total':
+        default:
+          aValue = a.totalIssues + a.totalPullRequests + a.totalCommits + a.totalReviews;
+          bValue = b.totalIssues + b.totalPullRequests + b.totalCommits + b.totalReviews;
+          break;
+      }
+      
+      if (sortDirection === 'asc') {
+        return aValue - bValue;
+      } else {
+        return bValue - aValue;
+      }
+    });
+  };
+
   // Mapから配列に変換してソート
-  const memberSummaries: MemberSummary[] = Array.from(memberMap.values()).sort((a, b) => {
-    const totalA = a.totalIssues + a.totalPullRequests + a.totalCommits + a.totalReviews;
-    const totalB = b.totalIssues + b.totalPullRequests + b.totalCommits + b.totalReviews;
-    return totalB - totalA;
-  });
+  const memberSummaries: MemberSummary[] = sortMembers(Array.from(memberMap.values()));
 
   console.log('Final member summaries:', memberSummaries);
+
+  // ソートハンドラー
+  const handleSort = (field: SortField) => {
+    if (sortField === field) {
+      setSortDirection(sortDirection === 'asc' ? 'desc' : 'asc');
+    } else {
+      setSortField(field);
+      setSortDirection('desc');
+    }
+  };
+
+  // ソートアイコン
+  const getSortIcon = (field: SortField) => {
+    if (sortField !== field) {
+      return (
+        <svg className="w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 16V4m0 0L3 8m4-4l4 4m6 0v12m0 0l4-4m-4 4l-4-4" />
+        </svg>
+      );
+    }
+    
+    if (sortDirection === 'asc') {
+      return (
+        <svg className="w-4 h-4 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 15l7-7 7 7" />
+        </svg>
+      );
+    } else {
+      return (
+        <svg className="w-4 h-4 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+        </svg>
+      );
+    }
+  };
 
   const sortedMembers = memberSummaries;
 
@@ -107,20 +182,50 @@ export const MemberActivityTable: React.FC<MemberActivityTableProps> = ({
               <th className="text-left py-3 px-4 font-semibold text-gray-900 min-w-[200px]">
                 メンバー
               </th>
-              <th className="text-center py-3 px-4 font-semibold text-gray-900 min-w-[150px]">
-                イシュー作成数
+              <th 
+                className="text-center py-3 px-4 font-semibold text-gray-900 min-w-[150px] cursor-pointer hover:bg-gray-50 transition-colors"
+                onClick={() => handleSort('issues')}
+              >
+                <div className="flex items-center justify-center space-x-1">
+                  <span>イシュー作成数</span>
+                  {getSortIcon('issues')}
+                </div>
               </th>
-              <th className="text-center py-3 px-4 font-semibold text-gray-900 min-w-[150px]">
-                プルリク作成数
+              <th 
+                className="text-center py-3 px-4 font-semibold text-gray-900 min-w-[150px] cursor-pointer hover:bg-gray-50 transition-colors"
+                onClick={() => handleSort('pullRequests')}
+              >
+                <div className="flex items-center justify-center space-x-1">
+                  <span>プルリク作成数</span>
+                  {getSortIcon('pullRequests')}
+                </div>
               </th>
-              <th className="text-center py-3 px-4 font-semibold text-gray-900 min-w-[150px]">
-                コミット数
+              <th 
+                className="text-center py-3 px-4 font-semibold text-gray-900 min-w-[150px] cursor-pointer hover:bg-gray-50 transition-colors"
+                onClick={() => handleSort('commits')}
+              >
+                <div className="flex items-center justify-center space-x-1">
+                  <span>コミット数</span>
+                  {getSortIcon('commits')}
+                </div>
               </th>
-              <th className="text-center py-3 px-4 font-semibold text-gray-900 min-w-[150px]">
-                レビュー数
+              <th 
+                className="text-center py-3 px-4 font-semibold text-gray-900 min-w-[150px] cursor-pointer hover:bg-gray-50 transition-colors"
+                onClick={() => handleSort('reviews')}
+              >
+                <div className="flex items-center justify-center space-x-1">
+                  <span>レビュー数</span>
+                  {getSortIcon('reviews')}
+                </div>
               </th>
-              <th className="text-center py-3 px-4 font-semibold text-gray-900 min-w-[100px]">
-                合計
+              <th 
+                className="text-center py-3 px-4 font-semibold text-gray-900 min-w-[100px] cursor-pointer hover:bg-gray-50 transition-colors"
+                onClick={() => handleSort('total')}
+              >
+                <div className="flex items-center justify-center space-x-1">
+                  <span>合計</span>
+                  {getSortIcon('total')}
+                </div>
               </th>
             </tr>
           </thead>
