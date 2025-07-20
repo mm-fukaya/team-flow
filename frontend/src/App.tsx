@@ -408,6 +408,11 @@ function App() {
               </div>
             </div>
 
+            {/* GitHub API レートリミット */}
+            <div className="mb-8">
+              <RateLimitDisplay />
+            </div>
+
             {/* 取得済みデータ表示 */}
             <div>
               <h3 className="text-xl font-medium mb-4">取得済みデータ</h3>
@@ -635,10 +640,6 @@ function App() {
 
         {/* メンバー活動サマリー */}
         
-        {/* GitHub API レートリミット */}
-        <div className="mt-8">
-          <RateLimitDisplay />
-        </div>
       </div>
     </div>
   );
