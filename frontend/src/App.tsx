@@ -52,6 +52,10 @@ function App() {
   // レートリミット関連のstate
   const [showRateLimitDialog, setShowRateLimitDialog] = useState(false);
   const [rateLimitInfo, setRateLimitInfo] = useState<RateLimitInfo | null>(null);
+  
+  // 全組織データ取得管理用のstate
+  const [isFetchingAllOrganizations, setIsFetchingAllOrganizations] = useState(false);
+  const [completedOrganizations, setCompletedOrganizations] = useState<string[]>([]);
 
   useEffect(() => {
     loadOrganizations();
@@ -220,7 +224,66 @@ function App() {
     }
   };
 
-  // 月毎データを取得
+  // 全組織の月毎データを取得
+  const handleFetchAllOrganizationsMonthlyData = async (monthStart: string, monthEnd: string) => {
+    // レートリミットチェック
+    const rateLimit = await fetchRateLimitInfo();
+    if (rateLimit && rateLimit.remaining <= 2000) {
+      setRateLimitInfo(rateLimit);
+      setShowRateLimitDialog(true);
+      return;
+    }
+
+    setIsFetchingAllOrganizations(true);
+    setCompletedOrganizations([]);
+    
+    const results: { orgName: string; success: boolean; error?: string }[] = [];
+    
+    try {
+      for (const org of organizations) {
+        try {
+          // 既存データのチェック
+          const existingData = monthlyData[org.name] || [];
+          const monthKey = moment(monthStart).format('YYYY-MM');
+          const isAlreadyFetched = existingData.some(month => month.monthKey === monthKey);
+          
+          if (isAlreadyFetched) {
+            // 既に取得済みの場合は確認ダイアログを表示
+            setMonthlyConfirmDialogData({ orgName: org.name, monthStart, monthEnd });
+            setShowMonthlyConfirmDialog(true);
+            return; // ダイアログが表示されたら処理を中断
+          }
+          
+          await api.fetchMonthlyData(org.name, monthStart, monthEnd, false);
+          results.push({ orgName: org.name, success: true });
+          setCompletedOrganizations(prev => [...prev, org.name]);
+        } catch (error: any) {
+          console.error(`Error fetching monthly data for ${org.name}:`, error);
+          results.push({ orgName: org.name, success: false, error: error.message });
+        }
+      }
+      
+      await loadMonthlyData();
+      
+      // 全組織の処理が完了したら結果を表示
+      const successCount = results.filter(r => r.success).length;
+      const failureCount = results.filter(r => !r.success).length;
+      
+      if (failureCount === 0) {
+        alert(`全組織（${organizations.length}組織）の月毎データ取得が完了しました`);
+      } else {
+        alert(`月毎データ取得が完了しました\n成功: ${successCount}組織\n失敗: ${failureCount}組織`);
+      }
+    } catch (error) {
+      console.error('Error in batch monthly data fetch:', error);
+      alert('月毎データの取得中にエラーが発生しました');
+    } finally {
+      setIsFetchingAllOrganizations(false);
+      setCompletedOrganizations([]);
+    }
+  };
+
+  // 月毎データを取得（個別組織用）
   const handleFetchMonthlyData = async (orgName: string, monthStart: string, monthEnd: string, forceUpdate: boolean = false) => {
     // レートリミットチェック
     const rateLimit = await fetchRateLimitInfo();
@@ -248,7 +311,7 @@ function App() {
     try {
       await api.fetchMonthlyData(orgName, monthStart, monthEnd, forceUpdate);
       await loadMonthlyData();
-      alert(`月毎データの取得が完了しました`);
+      // 個別組織の場合はダイアログを表示しない
     } catch (error: any) {
       console.error('Error fetching monthly data:', error);
       alert('月毎データの取得に失敗しました');
@@ -280,6 +343,7 @@ function App() {
         true
       );
       await loadMonthlyData();
+      // 強制更新の場合は個別ダイアログを表示
       alert(`月毎データの強制更新が完了しました`);
     } catch (error) {
       console.error('Error force updating monthly data:', error);
@@ -383,22 +447,20 @@ function App() {
                         const monthStart = moment(fetchMonth).startOf('month').format('YYYY-MM-DD');
                         const monthEnd = moment(fetchMonth).endOf('month').format('YYYY-MM-DD');
                         
-                        // 各組織に対して個別にチェックして取得
-                        organizations.forEach(org => {
-                          handleFetchMonthlyData(org.name, monthStart, monthEnd);
-                        });
+                        // 全組織のデータを一括取得
+                        handleFetchAllOrganizationsMonthlyData(monthStart, monthEnd);
                       }
                     }}
-                    disabled={!fetchMonth || isFetchingMonthly}
+                    disabled={!fetchMonth || isFetchingAllOrganizations}
                     className="w-full bg-gradient-to-r from-blue-500 to-blue-600 text-white py-3 px-6 rounded-lg hover:from-blue-600 hover:to-blue-700 disabled:from-gray-400 disabled:to-gray-500 transition-all duration-200 font-medium"
                   >
-                    {isFetchingMonthly ? (
+                    {isFetchingAllOrganizations ? (
                       <span className="flex items-center justify-center">
                         <svg className="animate-spin -ml-1 mr-3 h-5 w-5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
                           <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
                           <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
                         </svg>
-                        取得中...
+                        取得中... ({completedOrganizations.length}/{organizations.length})
                       </span>
                     ) : (
                       '月毎データ取得（全組織）'
