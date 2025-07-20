@@ -334,22 +334,43 @@ function App() {
     }
     
     setShowMonthlyConfirmDialog(false);
-    setIsFetchingMonthly(true);
+    
+    // 全組織の強制更新を実行
+    const { monthStart, monthEnd } = monthlyConfirmDialogData;
+    setIsFetchingAllOrganizations(true);
+    setCompletedOrganizations([]);
+    
+    const results: { orgName: string; success: boolean; error?: string }[] = [];
+    
     try {
-      await api.fetchMonthlyData(
-        monthlyConfirmDialogData.orgName, 
-        monthlyConfirmDialogData.monthStart, 
-        monthlyConfirmDialogData.monthEnd, 
-        true
-      );
+      for (const org of organizations) {
+        try {
+          await api.fetchMonthlyData(org.name, monthStart, monthEnd, true);
+          results.push({ orgName: org.name, success: true });
+          setCompletedOrganizations(prev => [...prev, org.name]);
+        } catch (error: any) {
+          console.error(`Error force updating monthly data for ${org.name}:`, error);
+          results.push({ orgName: org.name, success: false, error: error.message });
+        }
+      }
+      
       await loadMonthlyData();
-      // 強制更新の場合は個別ダイアログを表示
-      alert(`月毎データの強制更新が完了しました`);
+      
+      // 全組織の処理が完了したら結果を表示
+      const successCount = results.filter(r => r.success).length;
+      const failureCount = results.filter(r => !r.success).length;
+      
+      if (failureCount === 0) {
+        alert(`全組織（${organizations.length}組織）の月毎データ強制更新が完了しました`);
+      } else {
+        alert(`月毎データ強制更新が完了しました\n成功: ${successCount}組織\n失敗: ${failureCount}組織`);
+      }
     } catch (error) {
-      console.error('Error force updating monthly data:', error);
-      alert('月毎データの強制更新に失敗しました');
+      console.error('Error in batch monthly data force update:', error);
+      alert('月毎データの強制更新中にエラーが発生しました');
     } finally {
-      setIsFetchingMonthly(false);
+      setIsFetchingAllOrganizations(false);
+      setCompletedOrganizations([]);
       setMonthlyConfirmDialogData(null);
     }
   };
