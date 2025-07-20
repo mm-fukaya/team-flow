@@ -107,9 +107,31 @@ export class GitHubService {
 
   async getOrganizationMembers(orgName: string): Promise<GitHubUser[]> {
     try {
-      return await this.makeRequest<GitHubUser[]>(`${this.baseURL}/orgs/${orgName}/members`, {
-        per_page: 100
-      });
+      let allMembers: GitHubUser[] = [];
+      let page = 1;
+      let hasMore = true;
+      const perPage = 100;
+
+      console.log(`${orgName}組織のメンバー取得開始`);
+
+      // ページネーションで全メンバーを取得
+      while (hasMore && page <= 10) { // 最大10ページ（1000人のメンバー）
+        const members = await this.makeRequest<GitHubUser[]>(`${this.baseURL}/orgs/${orgName}/members`, {
+          per_page: perPage,
+          page: page
+        });
+        
+        allMembers.push(...members);
+        
+        // 次のページがあるかチェック
+        hasMore = members.length === perPage;
+        page++;
+        
+        console.log(`${orgName}組織: ${page-1}ページ目で${members.length}人のメンバーを取得（累計: ${allMembers.length}人）`);
+      }
+
+      console.log(`${orgName}組織: 合計${allMembers.length}人のメンバーを取得完了`);
+      return allMembers;
     } catch (error) {
       console.error(`Error fetching members for ${orgName}:`, error);
       throw error;
