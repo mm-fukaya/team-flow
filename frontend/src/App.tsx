@@ -468,9 +468,6 @@ function App() {
           return shouldShow;
         })() && (
           <div className="bg-white rounded-xl shadow-lg p-6 mb-8">
-            <h2 className="text-2xl font-semibold text-gray-900 mb-6">
-              全メンバー活動サマリー ({moment(displayStartMonth).format('YYYY年M月')} - {moment(displayEndMonth).format('YYYY年M月')})
-            </h2>
             <MemberActivityTable
               activities={activities}
               startDate={displayStartMonth}
