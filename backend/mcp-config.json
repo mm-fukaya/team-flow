@@ -1,0 +1,13 @@
+{
+  "mcpServers": {
+    "git-status-server": {
+      "command": "node",
+      "args": ["dist/index.js"],
+      "env": {
+        "PORT": "3001",
+        "GITHUB_TOKEN": "${GITHUB_TOKEN}"
+      },
+      "cwd": "/Users/ma_fukaya/temp/Cursor/GitStatus/backend"
+    }
+  }
+} 

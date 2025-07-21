@@ -4,6 +4,7 @@ import { ActivityChart } from './components/ActivityChart';
 import { MemberSelector } from './components/MemberSelector';
 import { RateLimitDisplay } from './components/RateLimitDisplay';
 import { MemberActivityTable } from './components/MemberActivityTable';
+import { NaturalLanguageQuery } from './components/NaturalLanguageQuery';
 import { api } from './services/api';
 import { Organization, MemberActivity } from './types';
 
@@ -546,6 +547,11 @@ function App() {
               </div>
             </div>
           </div>
+        </div>
+
+        {/* 自然言語クエリ */}
+        <div className="mb-8">
+          <NaturalLanguageQuery />
         </div>
 
         {/* 表示期間設定 */}
