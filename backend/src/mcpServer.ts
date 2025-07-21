@@ -60,13 +60,13 @@ export class GitStatusMCPServer {
     return [
       {
         name: "query_member_activities",
-        description: "自然言語でメンバー活動を検索します。メンバー名、組織名、活動タイプ、期間などを指定できます。",
+        description: "自然言語でメンバー活動を検索します。メンバー名、組織名、活動タイプ、期間などを指定できます。メンバー比較や組織比較も可能です。",
         inputSchema: {
           type: "object",
           properties: {
             query: {
               type: "string",
-              description: "自然言語クエリ（例: 'mm-kadoの活動を表示して', '最も活動したメンバー上位5人'）"
+              description: "自然言語クエリ（例: 'mm-kadoの活動を表示して', '最も活動したメンバー上位5人', 'mm-kadoとmm-rayyanの活動を比較して', 'macromillとmacromill-mintを比較して'）"
             }
           },
           required: ["query"]
