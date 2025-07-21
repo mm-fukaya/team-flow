@@ -7,7 +7,8 @@ import {
   GitHubCommit, 
   GitHubReview,
   MemberActivity,
-  DateRange 
+  DateRange,
+  Organization
 } from '../types';
 import { graphql } from '@octokit/graphql';
 
@@ -923,10 +924,17 @@ export class GitHubService {
 
       // レビューはGraphQLで既に集計済みのため、ここでの処理を削除
 
+      // 組織の表示名を取得
+      const organizations: Organization[] = require('../../../config/organizations.json').organizations;
+      const orgConfig = organizations.find(org => org.name === orgName);
+      const displayName = orgConfig ? orgConfig.displayName : orgName;
+
       memberActivities.push({
         login: member.login,
         name: member.name,
         avatar_url: member.avatar_url,
+        organization: orgName,
+        organizationDisplayName: displayName,
         activities
       });
     }
