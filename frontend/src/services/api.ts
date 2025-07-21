@@ -158,5 +158,11 @@ export const api = {
   async getWeeklyActivities() {
     const response = await axios.get(`${API_BASE_URL}/weekly-activities`);
     return response.data;
+  },
+
+  // 自然言語クエリを実行
+  async processNaturalLanguageQuery(query: string) {
+    const response = await axios.post(`${API_BASE_URL}/query`, { query });
+    return response.data;
   }
 }; 

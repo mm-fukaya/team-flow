@@ -5,6 +5,7 @@ import path from 'path';
 import { GitHubService } from './services/githubService';
 import { DataService } from './services/dataService';
 import { Organization, DateRange } from './types';
+import { GitStatusMCPServer } from './mcpServer';
 
 dotenv.config();
 
@@ -16,6 +17,7 @@ app.use(express.json());
 
 const githubService = new GitHubService(process.env.GITHUB_TOKEN || '');
 const dataService = new DataService();
+const mcpServer = new GitStatusMCPServer();
 
 // 組織設定を読み込み
 const organizations: Organization[] = require('../../config/organizations.json').organizations;
@@ -23,7 +25,7 @@ const organizations: Organization[] = require('../../config/organizations.json')
 // メンバー一覧を取得
 app.get('/api/members', async (req, res) => {
   try {
-    const orgName = req.query.org as string;
+    const orgName = req.query.organization as string || req.query.org as string;
     if (!orgName) {
       return res.status(400).json({ error: 'Organization name is required' });
     }
@@ -536,6 +538,215 @@ app.get('/api/monthly-activities', (req, res) => {
   } catch (error) {
     console.error('Error loading monthly activities:', error);
     res.status(500).json({ error: 'Failed to load monthly activities' });
+  }
+});
+
+// 自然言語クエリAPIエンドポイント
+app.post('/api/query', async (req, res) => {
+  try {
+    const { query } = req.body;
+    
+    if (!query) {
+      return res.status(400).json({ error: 'Query is required' });
+    }
+
+    // 全組織のデータを読み込み
+    const { activities } = dataService.loadAllOrganizationsActivities();
+    
+    // NaturalLanguageQueryServiceをインポートして使用
+    const { NaturalLanguageQueryService } = require('./services/naturalLanguageQueryService');
+    const queryService = new NaturalLanguageQueryService(activities);
+    const result = await queryService.processQuery(query);
+    
+    res.json(result);
+  } catch (error) {
+    console.error('Error processing query:', error);
+    res.status(500).json({ error: 'Failed to process query' });
+  }
+});
+
+// ===== MCP (Model Context Protocol) エンドポイント =====
+
+// MCPサーバー情報を取得
+app.get('/mcp/server/info', (req, res) => {
+  try {
+    const serverInfo = mcpServer.getServerInfo();
+    res.json(serverInfo);
+  } catch (error) {
+    console.error('Error getting MCP server info:', error);
+    res.status(500).json({ error: 'Failed to get MCP server info' });
+  }
+});
+
+// 利用可能なツール一覧を取得
+app.get('/mcp/tools/list', (req, res) => {
+  try {
+    const tools = mcpServer.getTools();
+    res.json({ tools });
+  } catch (error) {
+    console.error('Error getting MCP tools:', error);
+    res.status(500).json({ error: 'Failed to get MCP tools' });
+  }
+});
+
+// ツールを実行
+app.post('/mcp/tools/call', async (req, res) => {
+  try {
+    const { name, arguments: args } = req.body;
+    
+    if (!name) {
+      return res.status(400).json({ error: 'Tool name is required' });
+    }
+
+    const result = await mcpServer.executeTool(name, args || {});
+    res.json({ 
+      content: [
+        {
+          type: "text",
+          text: JSON.stringify(result, null, 2)
+        }
+      ]
+    });
+  } catch (error) {
+    console.error('Error executing MCP tool:', error);
+    res.status(500).json({ 
+      error: 'Failed to execute MCP tool',
+      details: error instanceof Error ? error.message : 'Unknown error'
+    });
+  }
+});
+
+// 利用可能なリソース一覧を取得
+app.get('/mcp/resources/list', (req, res) => {
+  try {
+    const resources = mcpServer.getResources();
+    res.json({ resources });
+  } catch (error) {
+    console.error('Error getting MCP resources:', error);
+    res.status(500).json({ error: 'Failed to get MCP resources' });
+  }
+});
+
+// リソースを読み取り
+app.post('/mcp/resources/read', async (req, res) => {
+  try {
+    const { uri } = req.body;
+    
+    if (!uri) {
+      return res.status(400).json({ error: 'Resource URI is required' });
+    }
+
+    const data = await mcpServer.readResource(uri);
+    res.json({ 
+      contents: [
+        {
+          uri,
+          mimeType: 'application/json',
+          text: JSON.stringify(data, null, 2)
+        }
+      ]
+    });
+  } catch (error) {
+    console.error('Error reading MCP resource:', error);
+    res.status(500).json({ 
+      error: 'Failed to read MCP resource',
+      details: error instanceof Error ? error.message : 'Unknown error'
+    });
+  }
+});
+
+// MCPプロトコル準拠の統合エンドポイント
+app.post('/mcp', async (req, res) => {
+  try {
+    const { method, params } = req.body;
+    
+    switch (method) {
+      case 'initialize':
+        res.json({
+          jsonrpc: '2.0',
+          id: req.body.id,
+          result: {
+            protocolVersion: '2024-11-05',
+            capabilities: mcpServer.getServerInfo().capabilities,
+            serverInfo: mcpServer.getServerInfo()
+          }
+        });
+        break;
+        
+      case 'tools/list':
+        res.json({
+          jsonrpc: '2.0',
+          id: req.body.id,
+          result: {
+            tools: mcpServer.getTools()
+          }
+        });
+        break;
+        
+      case 'tools/call':
+        const toolResult = await mcpServer.executeTool(params.name, params.arguments || {});
+        res.json({
+          jsonrpc: '2.0',
+          id: req.body.id,
+          result: {
+            content: [
+              {
+                type: "text",
+                text: JSON.stringify(toolResult, null, 2)
+              }
+            ]
+          }
+        });
+        break;
+        
+      case 'resources/list':
+        res.json({
+          jsonrpc: '2.0',
+          id: req.body.id,
+          result: {
+            resources: mcpServer.getResources()
+          }
+        });
+        break;
+        
+      case 'resources/read':
+        const resourceData = await mcpServer.readResource(params.uri);
+        res.json({
+          jsonrpc: '2.0',
+          id: req.body.id,
+          result: {
+            contents: [
+              {
+                uri: params.uri,
+                mimeType: 'application/json',
+                text: JSON.stringify(resourceData, null, 2)
+              }
+            ]
+          }
+        });
+        break;
+        
+      default:
+        res.status(400).json({
+          jsonrpc: '2.0',
+          id: req.body.id,
+          error: {
+            code: -32601,
+            message: `Method not found: ${method}`
+          }
+        });
+    }
+  } catch (error) {
+    console.error('Error in MCP request:', error);
+    res.status(500).json({
+      jsonrpc: '2.0',
+      id: req.body.id,
+      error: {
+        code: -32603,
+        message: 'Internal error',
+        data: error instanceof Error ? error.message : 'Unknown error'
+      }
+    });
   }
 });
 

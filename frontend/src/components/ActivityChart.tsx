@@ -140,8 +140,8 @@ export const ActivityChart: React.FC<ActivityChartProps> = ({
       </div>
 
       {/* グラフ */}
-      <div style={{ width: '100%', height: '400px' }}>
-        <Bar data={chartData} options={options} />
+    <div style={{ width: '100%', height: '400px' }}>
+      <Bar data={chartData} options={options} />
       </div>
     </div>
   );
