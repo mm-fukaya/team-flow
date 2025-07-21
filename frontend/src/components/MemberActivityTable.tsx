@@ -1,5 +1,6 @@
 import React, { useState, useMemo } from 'react';
 import { MemberActivity } from '../types';
+import moment from 'moment';
 
 interface MemberActivityTableProps {
   activities: MemberActivity[];
@@ -229,11 +230,93 @@ export const MemberActivityTable: React.FC<MemberActivityTableProps> = ({
     return { maxIssues, maxPullRequests, maxCommits, maxReviews };
   }, [sortedMembers]);
 
+  // CSVダウンロード機能
+  const downloadCSV = () => {
+    // CSVヘッダー
+    const headers = ['メンバー名', '年月', '組織', 'イシュー作成数', 'プルリク作成数', 'コミット数', 'レビュー数', '合計'];
+    
+    // CSVデータを生成
+    const csvData: string[] = [];
+    
+    // 各メンバーの組織別・月毎データを処理
+    activities.forEach(activity => {
+      Object.entries(activity.activities).forEach(([yearMonth, data]) => {
+        const total = data.issues + data.pullRequests + data.commits + data.reviews;
+        const row = [
+          activity.name || activity.login,
+          yearMonth,
+          activity.organizationDisplayName || activity.organization || '不明の組織',
+          data.issues.toString(),
+          data.pullRequests.toString(),
+          data.commits.toString(),
+          data.reviews.toString(),
+          total.toString()
+        ];
+        csvData.push(row.join(','));
+      });
+    });
+    
+    // 名前、組織、日付の順でソート
+    csvData.sort((a, b) => {
+      const aParts = a.split(',');
+      const bParts = b.split(',');
+      
+      const aName = aParts[0];
+      const bName = bParts[0];
+      const aOrg = aParts[2];
+      const bOrg = bParts[2];
+      const aDate = aParts[1];
+      const bDate = bParts[1];
+      
+      // まず名前でソート
+      const nameCompare = aName.localeCompare(bName);
+      if (nameCompare !== 0) {
+        return nameCompare;
+      }
+      
+      // 名前が同じ場合は組織でソート
+      const orgCompare = aOrg.localeCompare(bOrg);
+      if (orgCompare !== 0) {
+        return orgCompare;
+      }
+      
+      // 組織も同じ場合は日付でソート（新しい日付順）
+      return bDate.localeCompare(aDate);
+    });
+    
+    // CSVファイルを生成
+    const csvContent = [headers.join(','), ...csvData].join('\n');
+    const blob = new Blob(['\uFEFF' + csvContent], { type: 'text/csv;charset=utf-8;' });
+    const link = document.createElement('a');
+    const url = URL.createObjectURL(blob);
+    
+    // ファイル名を生成（期間を含む）
+    const fileName = `member_activities_${startDate}_${endDate}.csv`;
+    
+    link.setAttribute('href', url);
+    link.setAttribute('download', fileName);
+    link.style.visibility = 'hidden';
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
   return (
     <div className="bg-white rounded-lg shadow-md p-6">
-      <h3 className="text-xl font-semibold text-gray-900 mb-6">
-        全メンバー活動サマリー ({startDate} 〜 {endDate})
-      </h3>
+      <div className="flex justify-between items-center mb-6">
+        <h3 className="text-xl font-semibold text-gray-900">
+          全メンバー活動サマリー ({startDate} 〜 {endDate})
+        </h3>
+        <button
+          onClick={downloadCSV}
+          className="bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-lg transition-colors flex items-center space-x-2"
+        >
+          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+          </svg>
+          <span>CSVダウンロード</span>
+        </button>
+      </div>
       
       <div className="overflow-x-auto">
         <table className="w-full">
