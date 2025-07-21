@@ -108,8 +108,8 @@ export class NaturalLanguageQueryService {
   private extractMembers(query: string): string[] {
     const members: string[] = [];
     
-    // 既存のメンバーリストから検索
-    const allMembers = this.activities.map(a => a.login);
+    // 既存のメンバーリストから検索（重複を除去）
+    const allMembers = [...new Set(this.activities.map(a => a.login))];
     
     // クエリからメンバー名を検索
     allMembers.forEach(member => {
@@ -124,7 +124,8 @@ export class NaturalLanguageQueryService {
       return allMembers;
     }
 
-    return members;
+    // 重複を除去して返す
+    return [...new Set(members)];
   }
 
   private extractOrganizations(query: string): string[] {
@@ -426,6 +427,86 @@ export class NaturalLanguageQueryService {
   }
 
   private executeComparison(parsed: ParsedQuery, activities: MemberActivity[], originalQuery: string): QueryResult {
+    // メンバー間比較
+    if (parsed.entities.members && parsed.entities.members.length > 1) {
+      const comparison = parsed.entities.members.map(memberLogin => {
+        // 複数組織に存在する可能性があるため、すべての組織のデータを取得
+        const memberActivities = activities.filter(a => a.login === memberLogin);
+        
+        if (memberActivities.length === 0) {
+          return {
+            member: memberLogin,
+            displayName: memberLogin,
+            organization: 'Unknown',
+            issues: 0,
+            pullRequests: 0,
+            commits: 0,
+            reviews: 0,
+            total: 0,
+            found: false
+          };
+        }
+
+        // すべての組織のデータを合計
+        let totalIssues = 0;
+        let totalPRs = 0;
+        let totalCommits = 0;
+        let totalReviews = 0;
+        const organizations: string[] = [];
+
+        memberActivities.forEach(activity => {
+          if (activity.organization) {
+            organizations.push(activity.organization);
+          }
+          Object.values(activity.activities).forEach(data => {
+            totalIssues += data.issues;
+            totalPRs += data.pullRequests;
+            totalCommits += data.commits;
+            totalReviews += data.reviews;
+          });
+        });
+
+        const organizationDisplay = organizations.length > 1 ? organizations.join(', ') : (organizations[0] || 'Unknown');
+
+        return {
+          member: memberLogin,
+          displayName: memberActivities[0].name || memberLogin,
+          organization: organizationDisplay,
+          issues: totalIssues,
+          pullRequests: totalPRs,
+          commits: totalCommits,
+          reviews: totalReviews,
+          total: totalIssues + totalPRs + totalCommits + totalReviews,
+          found: true,
+          organizationCount: organizations.length
+        };
+      });
+
+      // 比較分析を追加
+      const analysis = {
+        comparison: comparison,
+        summary: {
+          totalMembers: comparison.length,
+          totalIssues: comparison.reduce((sum, member) => sum + member.issues, 0),
+          totalPRs: comparison.reduce((sum, member) => sum + member.pullRequests, 0),
+          totalCommits: comparison.reduce((sum, member) => sum + member.commits, 0),
+          totalReviews: comparison.reduce((sum, member) => sum + member.reviews, 0),
+          totalActivities: comparison.reduce((sum, member) => sum + member.total, 0)
+        },
+        insights: this.generateMemberComparisonInsights(comparison)
+      };
+
+      return {
+        type: 'comparison',
+        data: analysis,
+        message: `${parsed.entities.members.join('と')}の詳細比較結果です`,
+        query: originalQuery,
+        filters: {
+          members: parsed.entities.members
+        }
+      };
+    }
+
     // 組織間比較
     if (parsed.entities.organizations && parsed.entities.organizations.length > 1) {
       const comparison = parsed.entities.organizations.map(org => {
@@ -620,6 +701,65 @@ export class NaturalLanguageQueryService {
       message: '期間別の活動推移です',
       query: originalQuery
     };
+  }
+
+  private generateMemberComparisonInsights(comparison: any[]): string[] {
+    const insights: string[] = [];
+    
+    if (comparison.length < 2) return insights;
+
+    const [member1, member2] = comparison;
+    
+    // 総活動数の比較
+    if (member1.total > member2.total) {
+      insights.push(`${member1.displayName}の総活動数（${member1.total}件）が${member2.displayName}（${member2.total}件）より多いです`);
+    } else if (member2.total > member1.total) {
+      insights.push(`${member2.displayName}の総活動数（${member2.total}件）が${member1.displayName}（${member1.total}件）より多いです`);
+    }
+
+    // 活動タイプ別の比較
+    if (member1.issues > member2.issues) {
+      insights.push(`${member1.displayName}のIssue作成数（${member1.issues}件）が${member2.displayName}（${member2.issues}件）より多いです`);
+    } else if (member2.issues > member1.issues) {
+      insights.push(`${member2.displayName}のIssue作成数（${member2.issues}件）が${member1.displayName}（${member1.issues}件）より多いです`);
+    }
+
+    if (member1.pullRequests > member2.pullRequests) {
+      insights.push(`${member1.displayName}のPull Request作成数（${member1.pullRequests}件）が${member2.displayName}（${member2.pullRequests}件）より多いです`);
+    } else if (member2.pullRequests > member1.pullRequests) {
+      insights.push(`${member2.displayName}のPull Request作成数（${member2.pullRequests}件）が${member1.displayName}（${member1.pullRequests}件）より多いです`);
+    }
+
+    if (member1.commits > member2.commits) {
+      insights.push(`${member1.displayName}のコミット数（${member1.commits}件）が${member2.displayName}（${member2.commits}件）より多いです`);
+    } else if (member2.commits > member1.commits) {
+      insights.push(`${member2.displayName}のコミット数（${member2.commits}件）が${member1.displayName}（${member1.commits}件）より多いです`);
+    }
+
+    if (member1.reviews > member2.reviews) {
+      insights.push(`${member1.displayName}のレビュー数（${member1.reviews}件）が${member2.displayName}（${member2.reviews}件）より多いです`);
+    } else if (member2.reviews > member1.reviews) {
+      insights.push(`${member2.displayName}のレビュー数（${member2.reviews}件）が${member1.displayName}（${member1.reviews}件）より多いです`);
+    }
+
+    // 組織の比較
+    if (member1.organization !== member2.organization) {
+      insights.push(`${member1.displayName}は${member1.organization}、${member2.displayName}は${member2.organization}に所属しています`);
+    }
+
+    // バランスの良い活動
+    const member1Balance = Math.max(member1.issues, member1.pullRequests, member1.commits, member1.reviews) - 
+                          Math.min(member1.issues, member1.pullRequests, member1.commits, member1.reviews);
+    const member2Balance = Math.max(member2.issues, member2.pullRequests, member2.commits, member2.reviews) - 
+                          Math.min(member2.issues, member2.pullRequests, member2.commits, member2.reviews);
+
+    if (member1Balance < member2Balance) {
+      insights.push(`${member1.displayName}の方が${member2.displayName}より活動がバランス良く分散しています`);
+    } else if (member2Balance < member1Balance) {
+      insights.push(`${member2.displayName}の方が${member1.displayName}より活動がバランス良く分散しています`);
+    }
+
+    return insights;
   }
 
   private generateComparisonInsights(comparison: any[]): string[] {

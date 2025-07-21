@@ -29,6 +29,7 @@ export const NaturalLanguageQuery: React.FC<NaturalLanguageQueryProps> = ({ onQu
     'mm-kadoの活動を表示して',
     '最も活動したメンバー上位5人',
     'macromillとmacromill-mintを比較して',
+    'mm-kadoとmm-rayyanの活動を比較して',
     '活動を分析して',
     'イシュー数が多いメンバー上位10人',
     'コミット数でソートして',
@@ -155,48 +156,86 @@ export const NaturalLanguageQuery: React.FC<NaturalLanguageQueryProps> = ({ onQu
     const summary = data.summary;
     const insights = data.insights;
 
+    // メンバー比較か組織比較かを判定
+    const isMemberComparison = Array.isArray(comparison) && comparison.length > 0 && comparison[0].member;
+
     return (
       <div className="space-y-6">
         {/* 比較結果 */}
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-          {Array.isArray(comparison) && comparison.map((org, index) => (
+          {Array.isArray(comparison) && comparison.map((item, index) => (
             <div key={index} className="bg-white border border-gray-200 rounded-lg p-6">
-              <h3 className="text-lg font-semibold mb-4">{org.organizationDisplayName || org.organization}</h3>
+              <h3 className="text-lg font-semibold mb-4">
+                {isMemberComparison ? item.displayName : (item.organizationDisplayName || item.organization)}
+              </h3>
               <div className="space-y-2">
-                <div className="flex justify-between">
-                  <span>メンバー数:</span>
-                  <span className="font-semibold">{org.memberCount}</span>
-                </div>
-                <div className="flex justify-between">
-                  <span>イシュー:</span>
-                  <span className="font-semibold">{org.issues}</span>
-                </div>
-                <div className="flex justify-between">
-                  <span>プルリク:</span>
-                  <span className="font-semibold">{org.pullRequests}</span>
-                </div>
-                <div className="flex justify-between">
-                  <span>コミット:</span>
-                  <span className="font-semibold">{org.commits}</span>
-                </div>
-                <div className="flex justify-between">
-                  <span>レビュー:</span>
-                  <span className="font-semibold">{org.reviews}</span>
-                </div>
-                <div className="flex justify-between border-t pt-2">
-                  <span className="font-semibold">合計:</span>
-                  <span className="font-bold text-lg">{org.total}</span>
-                </div>
-                {/* 平均値も表示 */}
-                <div className="border-t pt-2 mt-2">
-                  <p className="text-sm text-gray-600 mb-1">1人あたりの平均:</p>
-                  <div className="grid grid-cols-2 gap-2 text-xs">
-                    <div>イシュー: {org.averageIssues?.toFixed(1) || 'N/A'}</div>
-                    <div>プルリク: {org.averagePRs?.toFixed(1) || 'N/A'}</div>
-                    <div>コミット: {org.averageCommits?.toFixed(1) || 'N/A'}</div>
-                    <div>レビュー: {org.averageReviews?.toFixed(1) || 'N/A'}</div>
-                  </div>
-                </div>
+                {isMemberComparison ? (
+                  // メンバー比較の場合
+                  <>
+                    <div className="flex justify-between">
+                      <span>組織:</span>
+                      <span className="font-semibold">{item.organization}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span>イシュー:</span>
+                      <span className="font-semibold">{item.issues}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span>プルリク:</span>
+                      <span className="font-semibold">{item.pullRequests}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span>コミット:</span>
+                      <span className="font-semibold">{item.commits}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span>レビュー:</span>
+                      <span className="font-semibold">{item.reviews}</span>
+                    </div>
+                    <div className="flex justify-between border-t pt-2">
+                      <span className="font-semibold">合計:</span>
+                      <span className="font-bold text-lg">{item.total}</span>
+                    </div>
+                  </>
+                ) : (
+                  // 組織比較の場合
+                  <>
+                    <div className="flex justify-between">
+                      <span>メンバー数:</span>
+                      <span className="font-semibold">{item.memberCount}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span>イシュー:</span>
+                      <span className="font-semibold">{item.issues}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span>プルリク:</span>
+                      <span className="font-semibold">{item.pullRequests}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span>コミット:</span>
+                      <span className="font-semibold">{item.commits}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span>レビュー:</span>
+                      <span className="font-semibold">{item.reviews}</span>
+                    </div>
+                    <div className="flex justify-between border-t pt-2">
+                      <span className="font-semibold">合計:</span>
+                      <span className="font-bold text-lg">{item.total}</span>
+                    </div>
+                    {/* 平均値も表示 */}
+                    <div className="border-t pt-2 mt-2">
+                      <p className="text-sm text-gray-600 mb-1">1人あたりの平均:</p>
+                      <div className="grid grid-cols-2 gap-2 text-xs">
+                        <div>イシュー: {item.averageIssues?.toFixed(1) || 'N/A'}</div>
+                        <div>プルリク: {item.averagePRs?.toFixed(1) || 'N/A'}</div>
+                        <div>コミット: {item.averageCommits?.toFixed(1) || 'N/A'}</div>
+                        <div>レビュー: {item.averageReviews?.toFixed(1) || 'N/A'}</div>
+                      </div>
+                    </div>
+                  </>
+                )}
               </div>
             </div>
           ))}
